@@ -1,5 +1,4 @@
 using Microsoft.Win32;
-using Outlook2021TodoAddIn.Forms;
 using System;
 using System.Windows.Forms;
 using Office = Microsoft.Office.Core;
@@ -39,18 +38,12 @@ namespace Outlook2021TodoAddIn
             try
             {
                 this.AppControl = new AppointmentsControl();
-                this.AppControl.MailAlertsEnabled        = Properties.Settings.Default.MailAlertsEnabled;
-                this.AppControl.ShowPastAppointments     = Properties.Settings.Default.ShowPastAppointments;
-                this.AppControl.ShowFriendlyGroupHeaders = Properties.Settings.Default.ShowFriendlyGroupHeaders;
-                this.AppControl.ShowDayNames             = Properties.Settings.Default.ShowDayNames;
-                this.AppControl.ShowWeekNumbers          = Properties.Settings.Default.ShowWeekNumbers;
-                this.AppControl.ShowTasks                = Properties.Settings.Default.ShowTasks;
-                this.AppControl.ShowCompletedTasks       = Properties.Settings.Default.ShowCompletedTasks;
-                this.AppControl.FirstDayOfWeek           = Properties.Settings.Default.FirstDayOfWeek;
-                this.AppControl.NumDays                  = Properties.Settings.Default.NumDays;
+
+                // Accounts aus Settings laden (alle anderen Settings sind hardcoded)
+                this.AppControl.Accounts  = Properties.Settings.Default.Accounts;
+                this.AppControl.ShowTasks = Properties.Settings.Default.ShowTasks;
 
                 ToDoTaskPane = this.CustomTaskPanes.Add(this.AppControl, " ");
-            // Scrollbars deaktivieren für Outlook2021TodoAddIn (gerhard@lustig.at)
                 ToDoTaskPane.Visible              = Properties.Settings.Default.Visible;
                 ToDoTaskPane.Width                = Properties.Settings.Default.Width;
                 ToDoTaskPane.DockPosition         = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
@@ -59,14 +52,21 @@ namespace Outlook2021TodoAddIn
                 this.AppControl.SizeChanged       += appControl_SizeChanged;
 
                 _taskPaneCreated = true;
+
                 // Kalender-Änderungen überwachen
-                var calFolder = this.Application.Session.GetDefaultFolder(Microsoft.Office.Interop.Outlook.OlDefaultFolders.olFolderCalendar) as Microsoft.Office.Interop.Outlook.Folder;
+                var calFolder = this.Application.Session.GetDefaultFolder(
+                    Microsoft.Office.Interop.Outlook.OlDefaultFolders.olFolderCalendar)
+                    as Microsoft.Office.Interop.Outlook.Folder;
                 if (calFolder != null)
                 {
-                    ((Microsoft.Office.Interop.Outlook.ItemsEvents_Event)calFolder.Items).ItemAdd += (item) => { if (AppControl != null) AppControl.RetrieveData(); };
-                    ((Microsoft.Office.Interop.Outlook.ItemsEvents_Event)calFolder.Items).ItemChange += (item) => { if (AppControl != null) AppControl.RetrieveData(); };
-                    ((Microsoft.Office.Interop.Outlook.ItemsEvents_Event)calFolder.Items).ItemRemove += () => { if (AppControl != null) AppControl.RetrieveData(); };
+                    ((Microsoft.Office.Interop.Outlook.ItemsEvents_Event)calFolder.Items).ItemAdd
+                        += (item) => { if (AppControl != null) AppControl.RetrieveData(); };
+                    ((Microsoft.Office.Interop.Outlook.ItemsEvents_Event)calFolder.Items).ItemChange
+                        += (item) => { if (AppControl != null) AppControl.RetrieveData(); };
+                    ((Microsoft.Office.Interop.Outlook.ItemsEvents_Event)calFolder.Items).ItemRemove
+                        += () => { if (AppControl != null) AppControl.RetrieveData(); };
                 }
+
                 this.AppControl.SelectedDate = DateTime.Today;
 
                 ((Microsoft.Office.Interop.Outlook.ApplicationEvents_11_Event)this.Application).Quit

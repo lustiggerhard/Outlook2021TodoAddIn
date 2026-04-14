@@ -190,64 +190,28 @@
     can be found.
   -->
   <ItemGroup>
-    <Compile Include="ComboBoxItem.cs" />
-    <Compile Include="Constants.cs" />
-    <Compile Include="CustomCalendar.cs">
-      <SubType>UserControl</SubType>
-    </Compile>
-    <Compile Include="CustomCalendar.Designer.cs">
-      <DependentUpon>CustomCalendar.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Forms\FormConfiguration.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Forms\FormConfiguration.Designer.cs">
-      <DependentUpon>FormConfiguration.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Forms\FormRecurringOpen.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Forms\FormRecurringOpen.Designer.cs">
-      <DependentUpon>FormRecurringOpen.cs</DependentUpon>
-    </Compile>
-    <Compile Include="Forms\NewMailAlert.cs">
-      <SubType>Form</SubType>
-    </Compile>
-    <Compile Include="Forms\NewMailAlert.Designer.cs">
-      <DependentUpon>NewMailAlert.cs</DependentUpon>
-    </Compile>
-    <Compile Include="OLTaskItem.cs" />
-    <Compile Include="OutlookHelper.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="NoLineListView.cs">
-      <SubType>Component</SubType>
-    </Compile>
     <Compile Include="AppointmentsControl.cs">
       <SubType>UserControl</SubType>
     </Compile>
     <Compile Include="AppointmentsControl.Designer.cs">
       <DependentUpon>AppointmentsControl.cs</DependentUpon>
     </Compile>
-    <Compile Include="SoundHelper.cs" />
+    <Compile Include="Constants.cs" />
+    <Compile Include="FormRecurringOpen.cs" />
+    <Compile Include="FormRecurringOpen.Designer.cs" />
+    <Compile Include="OLTaskItem.cs" />
+    <Compile Include="OutlookHelper.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="TodoRibbonAddIn.cs">
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="TodoRibbonAddIn.Designer.cs">
       <DependentUpon>TodoRibbonAddIn.cs</DependentUpon>
     </Compile>
-    <EmbeddedResource Include="CustomCalendar.resx">
-      <DependentUpon>CustomCalendar.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Forms\FormConfiguration.resx">
-      <DependentUpon>FormConfiguration.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Forms\FormRecurringOpen.resx">
-      <DependentUpon>FormRecurringOpen.cs</DependentUpon>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Forms\NewMailAlert.resx">
-      <DependentUpon>NewMailAlert.cs</DependentUpon>
+    <EmbeddedResource Include="AppointmentsControl.resx">
+      <DependentUpon>AppointmentsControl.cs</DependentUpon>
     </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
@@ -259,9 +223,6 @@
       <DependentUpon>Resources.resx</DependentUpon>
       <DesignTime>True</DesignTime>
     </Compile>
-    <EmbeddedResource Include="AppointmentsControl.resx">
-      <DependentUpon>AppointmentsControl.cs</DependentUpon>
-    </EmbeddedResource>
     <EmbeddedResource Include="TodoRibbonAddIn.resx">
       <DependentUpon>TodoRibbonAddIn.cs</DependentUpon>
     </EmbeddedResource>

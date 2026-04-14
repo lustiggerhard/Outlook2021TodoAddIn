@@ -1,8 +1,4 @@
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Debug\Outlook2021TodoAddIn.csproj.AssemblyReference.cache
-D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Debug\Outlook2021TodoAddIn.CustomCalendar.resources
-D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Debug\Outlook2021TodoAddIn.Forms.FormConfiguration.resources
-D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Debug\Outlook2021TodoAddIn.Forms.FormRecurringOpen.resources
-D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Debug\Outlook2021TodoAddIn.Forms.NewMailAlert.resources
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Debug\Outlook2021TodoAddIn.Properties.Resources.resources
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Debug\Outlook2021TodoAddIn.AppointmentsControl.resources
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Debug\Outlook2021TodoAddIn.TodoRibbonAddIn.resources
