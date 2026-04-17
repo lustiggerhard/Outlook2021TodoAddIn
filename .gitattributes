@@ -1,0 +1,12 @@
+* text=auto
+*.cs text eol=crlf
+*.csproj text eol=crlf
+*.bat text eol=crlf
+*.xml text eol=crlf
+*.config text eol=crlf
+*.manifest text eol=crlf
+*.vsto text eol=crlf
+*.dll binary
+*.pdb binary
+*.png binary
+*.ico binary
