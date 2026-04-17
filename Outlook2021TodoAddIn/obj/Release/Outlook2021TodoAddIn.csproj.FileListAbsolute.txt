@@ -11,12 +11,8 @@ D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\bin\Release\Microsoft.
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\bin\Release\Microsoft.Office.Tools.v4.0.Framework.dll
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\bin\Release\Microsoft.VisualStudio.Tools.Applications.Runtime.dll
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.csproj.AssemblyReference.cache
-D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.CustomCalendar.resources
-D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.Forms.FormConfiguration.resources
-D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.Forms.FormRecurringOpen.resources
-D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.Forms.NewMailAlert.resources
-D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.Properties.Resources.resources
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.AppointmentsControl.resources
+D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.Properties.Resources.resources
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.TodoRibbonAddIn.resources
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.csproj.GenerateResource.cache
 D:\VisualStudio\Outlook2021TodoAddIn\Outlook2021TodoAddIn\obj\Release\Outlook2021TodoAddIn.csproj.CoreCompileInputs.cache

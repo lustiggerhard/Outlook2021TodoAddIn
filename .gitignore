@@ -1,0 +1,25 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Build-Ausgaben
+bin/
+obj/
+
+# Zertifikate und Keys
+*.pfx
+*.snk
+*.key
+*.crt
+*.pem
+
+# Backups
+*.bak
+*.bak_*
+
+# Publish-Ausgaben
+app.publish/
+
+# Logs
+*.log
