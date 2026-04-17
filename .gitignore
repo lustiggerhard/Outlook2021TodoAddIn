@@ -1,25 +1,12 @@
-# Visual Studio
-.vs/
-*.user
+# VS temporäre Dateien - NICHT sichern
 *.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
 
-# Build-Ausgaben
-bin/
-obj/
+# Temporäre Build-Caches - NICHT sichern
+*.cache
+*.tmp
 
-# Zertifikate und Keys
-*.pfx
-*.snk
-*.key
-*.crt
-*.pem
-
-# Backups
-*.bak
-*.bak_*
-
-# Publish-Ausgaben
-app.publish/
-
-# Logs
-*.log
+# ALLES ANDERE wird gesichert (inkl. bin/ und obj/)
