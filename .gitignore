@@ -10,3 +10,6 @@
 *.tmp
 
 # ALLES ANDERE wird gesichert (inkl. bin/ und obj/)
+# Von VS generiert - nicht tracken
+Outlook2021TodoAddIn/bin/Release/*.manifest
+Outlook2021TodoAddIn/bin/Release/*.vsto
