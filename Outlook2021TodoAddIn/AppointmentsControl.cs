@@ -38,6 +38,7 @@ namespace Outlook2021TodoAddIn
         private OLTaskItem                 _contextMenuTask = null;
         private bool                       _splitterLoaded  = false;
         private bool                       _splitterReady   = false;
+        private DateTime                   _lastKnownDate  = DateTime.Today;
 
         // Schriftgrößen (pt)
         private const float FS_SMALL  = 8.0f;
@@ -128,6 +129,14 @@ namespace Outlook2021TodoAddIn
 
         public void RetrieveData()
         {
+            // Datum aktualisieren wenn Tag gewechselt hat
+            if (_selectedDate.Date == _lastKnownDate && _lastKnownDate != DateTime.Today)
+            {
+                _selectedDate  = DateTime.Today;
+                _calendarMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+            }
+            _lastKnownDate = DateTime.Today;
+
             if (!_splitterLoaded && splitContainer1.Height > 50)
             {
                 _splitterLoaded = true;
@@ -442,12 +451,13 @@ namespace Outlook2021TodoAddIn
         private string FormatDateHeader(DateTime date)
         {
             int diff = (int)(date - DateTime.Today).TotalDays;
-            string prefix = diff == -1 ? Constants.Yesterday + ":  " :
-                            diff ==  0 ? Constants.Today     + ":  " :
-                            diff ==  1 ? Constants.Tomorrow  + ":  " : "";
+            if (diff >= -1 && diff <= 1)
+                return diff == -1 ? Constants.Yesterday :
+                       diff ==  0 ? Constants.Today     :
+                                    Constants.Tomorrow;
             string text = date.ToShortDateString();
             if (CFG_SHOW_DAY_NAMES) text += "  (" + date.ToString("dddd") + ")";
-            return prefix + text;
+            return text;
         }
 
         private Label BuildGroupHeader(string text, int width, int height)
