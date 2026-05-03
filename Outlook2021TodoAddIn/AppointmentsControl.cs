@@ -1,3 +1,15 @@
+/**
+ * @file    AppointmentsControl.cs
+ * @brief   UserControl: Monatskalender, Terminliste, Aufgabenliste.
+ * @author  Gerhard Lustig <gerhard@lustig.at>
+ * @version 1.1.0
+ * @date    2026-05-03
+ * @history
+ *   1.1.0  2026-05-03  BuildCalendar: tbl vollständig aufbauen bevor panelCalendar
+ *                      angefasst wird (build-first-then-swap) — verhindert Blank-Zustand
+ *                      wenn nach Sleep/Wake eine Exception den Swap unterbricht.
+ *   1.0.0  2026-04-24  Initial release (table-based calendar and appointment list).
+ */
 using Outlook2021TodoAddIn.Forms;
 using System;
 using System.Collections.Generic;
@@ -33,6 +45,8 @@ namespace Outlook2021TodoAddIn
         private FlowLayoutPanel            _flpAppointments;
         private FlowLayoutPanel            _flpTasks;
         private System.Windows.Forms.Timer _resizeTimer;
+        private System.Windows.Forms.Timer _dayChangeTimer;  // Prüft Tageswechsel
+        private DateTime                   _lastKnownDate = DateTime.Today;
         private ToolTip                    _toolTip;
         private Outlook.AppointmentItem    _contextMenuAppt = null;
         private OLTaskItem                 _contextMenuTask = null;
@@ -95,6 +109,18 @@ namespace Outlook2021TodoAddIn
             _resizeTimer.Tick += (s, e) => { _resizeTimer.Stop(); if (IsHandleCreated) RetrieveData(); };
             pnlAppointments.Resize += (s, e) => { _resizeTimer.Stop(); _resizeTimer.Start(); };
             pnlTasks.Resize        += (s, e) => { _resizeTimer.Stop(); _resizeTimer.Start(); };
+
+            // Alle 60s prüfen ob Tageswechsel stattgefunden hat
+            _dayChangeTimer       = new System.Windows.Forms.Timer { Interval = 60000 };
+            _dayChangeTimer.Tick += (s, e) =>
+            {
+                if (DateTime.Today == _lastKnownDate) return;
+                _lastKnownDate = DateTime.Today;
+                _selectedDate  = DateTime.Today;
+                _calendarMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+                if (IsHandleCreated) RetrieveData();
+            };
+            _dayChangeTimer.Start();
 
             // Accounts aus Settings laden
             Accounts = Properties.Settings.Default.Accounts;
@@ -166,13 +192,10 @@ namespace Outlook2021TodoAddIn
             var fDay = new Font(Font.FontFamily, FS_NORMAL);
             var fKW  = new Font(Font.FontFamily, FS_SMALL - 0.5f);
 
-            int rowH = fDay.Height + 5;
-            panelCalendar.Height = 8 * rowH + 4;
+            int rowH = fDay.Height + 13;
 
-            panelCalendar.SuspendLayout();
-            foreach (Control c in panelCalendar.Controls) c.Dispose();
-            panelCalendar.Controls.Clear();
-
+            // tbl vollständig aufbauen bevor panelCalendar angefasst wird —
+            // so bleibt die alte Anzeige intakt falls hier eine Exception auftritt.
             var tbl = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, ColumnCount = 8, RowCount = 8,
@@ -230,6 +253,11 @@ namespace Outlook2021TodoAddIn
                 ws = ws.AddDays(7);
             }
 
+            // Atomar tauschen: erst jetzt panelCalendar anfassen
+            panelCalendar.SuspendLayout();
+            foreach (Control c in panelCalendar.Controls) c.Dispose();
+            panelCalendar.Controls.Clear();
+            panelCalendar.Height = 8 * rowH + 4;
             panelCalendar.Controls.Add(tbl);
             panelCalendar.ResumeLayout();
         }
@@ -313,12 +341,13 @@ namespace Outlook2021TodoAddIn
             _boldedDates = new HashSet<DateTime>(appts.Select(a => a.Start.Date).Distinct());
             BuildCalendar();
 
-            DateTime start = _selectedDate.Date;
+            DateTime start   = _selectedDate.Date;
+            DateTime cutoff  = _selectedDate.Date;   // Termine ausblenden wenn End < cutoff
             if (!CFG_SHOW_PAST_APPTS && start == DateTime.Today)
-                start = start.Add(DateTime.Now.TimeOfDay);
+                cutoff = DateTime.Now;   // Heute: erst ausblenden wenn Termin-Ende vorbei
 
             BuildItemsPanel(_flpAppointments, pnlAppointments,
-                appts.Where(a => a.Start >= start && a.Start <= start.AddDays((double)CFG_NUM_DAYS))
+                appts.Where(a => a.End >= cutoff && a.Start <= start.AddDays((double)CFG_NUM_DAYS))
                      .Cast<object>().ToList(),
                 isTask: false);
         }
@@ -369,7 +398,7 @@ namespace Outlook2021TodoAddIn
 
             if (items.Count == 0) { flp.ResumeLayout(); return; }
 
-            int panelH = container.ClientSize.Height;
+            int panelH = container.ClientSize.Height - 49;   // -49px: Outlook-Statusbalken
             if (panelH <= 0) panelH = 400;
             int w = Math.Max(container.ClientSize.Width - 2, 100);
 
@@ -379,7 +408,6 @@ namespace Outlook2021TodoAddIn
                 int hdrH    = rowH + 2;
                 int spacerH = 2;
                 int usedH   = 0;
-                panelH     -= rowH;   // -1: immer eine Zeile Puffer lassen
                 int lastDay = -1, lastYear = -1;
 
                 foreach (var item in items)
@@ -446,23 +474,72 @@ namespace Outlook2021TodoAddIn
                             diff ==  0 ? Constants.Today     + ":  " :
                             diff ==  1 ? Constants.Tomorrow  + ":  " : "";
             string text = date.ToShortDateString();
-            if (CFG_SHOW_DAY_NAMES) text += "  (" + date.ToString("dddd") + ")";
+            if (CFG_SHOW_DAY_NAMES) text += "§" + date.ToString("dddd");
             return prefix + text;
         }
 
-        private Label BuildGroupHeader(string text, int width, int height)
-            => new Label
+        private Control BuildGroupHeader(string text, int width, int height)
+        {
+            int sep = text.IndexOf('§');
+            if (sep < 0)
             {
-                Text      = text,
-                Font      = new Font(Font.FontFamily, FS_BOLD, FontStyle.Bold),
-                BackColor = SystemColors.Window,
-                ForeColor = Color.FromArgb(40, 60, 100),
+                return new Label
+                {
+                    Text      = text,
+                    Font      = new Font(Font.FontFamily, FS_BOLD, FontStyle.Bold),
+                    BackColor = SystemColors.Window,
+                    ForeColor = Color.FromArgb(40, 60, 100),
+                    Width     = width,
+                    Height    = height,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Padding   = new Padding(4, 0, 0, 0),
+                    Margin    = new Padding(0)
+                };
+            }
+
+            string datePart    = text.Substring(0, sep);
+            string weekdayPart = text.Substring(sep + 1);
+
+            var pnl = new Panel
+            {
                 Width     = width,
                 Height    = height,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Padding   = new Padding(4, 0, 0, 0),
-                Margin    = new Padding(0)
+                BackColor = SystemColors.Window,
+                Margin    = new Padding(0),
+                Padding   = new Padding(0)
             };
+
+            var lblDate = new Label
+            {
+                Text      = datePart,
+                Font      = new Font(Font.FontFamily, FS_BOLD, FontStyle.Bold),
+                ForeColor = Color.FromArgb(40, 60, 100),
+                BackColor = Color.Transparent,
+                AutoSize  = true,
+                Height    = height,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Location  = new System.Drawing.Point(4, 0)
+            };
+
+            var lblDay = new Label
+            {
+                Text      = weekdayPart,
+                Font      = new Font(Font.FontFamily, FS_NORMAL, FontStyle.Regular),
+                ForeColor = Color.FromArgb(40, 60, 100),
+                BackColor = Color.Transparent,
+                AutoSize  = true,
+                Height    = height,
+                TextAlign = ContentAlignment.MiddleLeft
+            };
+
+            pnl.Controls.Add(lblDate);
+            pnl.Controls.Add(lblDay);
+
+            lblDate.Width    = System.Windows.Forms.TextRenderer.MeasureText(datePart, lblDate.Font).Width;
+            lblDay.Location  = new System.Drawing.Point(lblDate.Left + lblDate.Width + 4, 0);
+
+            return pnl;
+        }
 
         // ── Termin-Eintrag ────────────────────────────────────────────────
 
@@ -494,7 +571,7 @@ namespace Outlook2021TodoAddIn
 
             tbl.Controls.Add(new Label
             {
-                Text = appt.Subject ?? "", Font = new Font(Font.FontFamily, FS_BOLD, FontStyle.Bold),
+                Text = appt.Subject ?? "", Font = new Font("Segoe UI Emoji", FS_BOLD, FontStyle.Bold),
                 TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill, AutoEllipsis = true,
                 Padding = new Padding(4, 0, 2, 0), Margin = new Padding(0)
             }, 2, 0);
@@ -505,7 +582,7 @@ namespace Outlook2021TodoAddIn
                 tbl.Controls.Add(new Label { Margin = new Padding(0) }, 0, 1);
                 tbl.Controls.Add(new Label
                 {
-                    Text = appt.Location, Font = new Font(Font.FontFamily, FS_SMALL),
+                    Text = appt.Location, Font = new Font(Font.FontFamily, FS_SMALL, FontStyle.Italic),
                     TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill, AutoEllipsis = true,
                     ForeColor = SystemColors.GrayText, Padding = new Padding(4, 0, 2, 0), Margin = new Padding(0)
                 }, 2, 1);
@@ -541,8 +618,8 @@ namespace Outlook2021TodoAddIn
             tbl.Controls.Add(bar, 1, 0);
 
             var subjectFont = task.Completed
-                ? new Font(Font.FontFamily, FS_BOLD, FontStyle.Bold | FontStyle.Strikeout)
-                : new Font(Font.FontFamily, FS_BOLD, FontStyle.Bold);
+                ? new Font("Segoe UI Emoji", FS_BOLD, FontStyle.Bold | FontStyle.Strikeout)
+                : new Font("Segoe UI Emoji", FS_BOLD, FontStyle.Bold);
 
             tbl.Controls.Add(new Label
             {
@@ -565,7 +642,7 @@ namespace Outlook2021TodoAddIn
                 ColumnCount = 3, RowCount = rows, Width = width, Height = rows * rowH,
                 Padding = new Padding(0), Margin = new Padding(0),
                 CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
-                BackColor = tint
+                BackColor = SystemColors.Window   // kein Tint auf Container
             };
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, COL_TIME));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, COL_BAR));
@@ -578,6 +655,8 @@ namespace Outlook2021TodoAddIn
         /// <summary>Labels transparent färben außer Spalte 0 (Zeit/Datum) und Panel (Balken)</summary>
         private static void TintChildren(TableLayoutPanel tbl)
         {
+            // tbl selbst bekommt Window als Hintergrund - kein Tint auf dem Container
+            tbl.BackColor = SystemColors.Window;
             foreach (Control c in tbl.Controls)
             {
                 if (c is Panel) continue;           // Farbbalken — nicht ändern
