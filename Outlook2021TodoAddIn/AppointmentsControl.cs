@@ -1,14 +1,31 @@
 /**
  * @file    AppointmentsControl.cs
- * @brief   UserControl: Monatskalender, Terminliste, Aufgabenliste.
+ * @brief   UserControl: Monatskalender + Terminliste.
  * @author  Gerhard Lustig <gerhard@lustig.at>
- * @version 1.1.0
- * @date    2026-05-03
+ * @version 2.2.0
+ * @date    2026-05-19
  * @history
- *   1.1.0  2026-05-03  BuildCalendar: tbl vollständig aufbauen bevor panelCalendar
- *                      angefasst wird (build-first-then-swap) — verhindert Blank-Zustand
- *                      wenn nach Sleep/Wake eine Exception den Swap unterbricht.
- *   1.0.0  2026-04-24  Initial release (table-based calendar and appointment list).
+ *   2.2.0  2026-05-19  Kalender-Controls einmal erstellen (InitCalendarControls), danach
+ *                      nur noch Properties updaten — kein GDI-Handle-Create/Destroy mehr
+ *                      pro Rebuild (~55 Controls). BuildCalendar() ist jetzt reine
+ *                      Property-Update-Schleife ohne Layout-Overhead.
+ *   2.1.0  2026-05-19  Appointment-Cache: COM-Abruf nur bei Monatswechsel oder expliziter
+ *                      Invalidierung — Tages-Klicks ohne Outlook-Roundtrip. BuildCalendar()
+ *                      nur wenn Monat wechselt oder Cache neu geladen wurde. Neu:
+ *                      InvalidateAndRefresh() für externe Trigger (ItemAdd/Change/Remove,
+ *                      Sleep/Wake, Tageswechsel).
+ *   2.0.0  2026-05-19  Task-Panel + alle CFG_-Konstanten entfernt; Font-Cache statt
+ *                      GDI-Leak per Rebuild; DASL-Filter locale-fix (MM/dd/yyyy invariant);
+ *                      toten tint-Parameter entfernt; BuildGroupHeader ohne §-Hack (Tuple);
+ *                      BuildItemsPanel direkt auf List<AppointmentItem> getypt;
+ *                      SplitContainer + Splitter-Persistenz entfernt.
+ *   1.3.3  2026-05-19  CalDay_DblClick: neuen Termin für angeklickten Tag anlegen.
+ *   1.3.2  2026-05-19  200ms-Timer nach CurrentFolder-Switch für DblClick.
+ *   1.3.1  2026-05-19  Click-Timer verhindert dass Rebuild den DoubleClick verschluckt.
+ *   1.3.0  2026-05-19  "Heute"-Button (⌂) in Navigationszeile.
+ *   1.2.0  2026-05-05  COL_BAR von 7 auf 10 px erhöht.
+ *   1.1.0  2026-05-03  Build-first-then-swap im Kalender.
+ *   1.0.0  2026-04-24  Initial release.
  */
 using Outlook2021TodoAddIn.Forms;
 using System;
@@ -25,59 +42,51 @@ namespace Outlook2021TodoAddIn
     public partial class AppointmentsControl : UserControl
     {
         // ══════════════════════════════════════════════════════════════════
-        // Hardcodierte Einstellungen (kein Config-Dialog mehr)
-        // ══════════════════════════════════════════════════════════════════
-
-        private const decimal  CFG_NUM_DAYS             = 90;
-        private const bool     CFG_SHOW_COMPLETED_TASKS = false;
-        private const bool     CFG_SHOW_PAST_APPTS      = false;
-        private const bool     CFG_SHOW_DAY_NAMES       = true;
-        private const bool     CFG_FRIENDLY_HEADERS     = true;
-        private const bool     CFG_SHOW_WEEK_NUMBERS    = true;
-
-        // ══════════════════════════════════════════════════════════════════
         // Felder
         // ══════════════════════════════════════════════════════════════════
 
-        private DateTime                   _selectedDate   = DateTime.Today;
+        private DateTime                   _selectedDate    = DateTime.Today;
         private DateTime                   _calendarMonth;
-        private HashSet<DateTime>          _boldedDates    = new HashSet<DateTime>();
+        private HashSet<DateTime>          _boldedDates     = new HashSet<DateTime>();
         private FlowLayoutPanel            _flpAppointments;
-        private FlowLayoutPanel            _flpTasks;
         private System.Windows.Forms.Timer _resizeTimer;
-        private System.Windows.Forms.Timer _dayChangeTimer;  // Prüft Tageswechsel
-        private DateTime                   _lastKnownDate = DateTime.Today;
+        private System.Windows.Forms.Timer _dayChangeTimer;
+        private DateTime                   _lastKnownDate   = DateTime.Today;
         private ToolTip                    _toolTip;
         private Outlook.AppointmentItem    _contextMenuAppt = null;
-        private OLTaskItem                 _contextMenuTask = null;
-        private bool                       _splitterLoaded  = false;
-        private bool                       _splitterReady   = false;
+        private System.Windows.Forms.Timer _clickTimer;
+        private DateTime                   _pendingClickDate;
 
-        // Schriftgrößen (pt)
-        private const float FS_SMALL  = 8.0f;
-        private const float FS_NORMAL = 8.5f;
-        private const float FS_BOLD   = 8.5f;
+        // Kalender-Control-Cache — einmal erstellt, danach nur Properties updaten
+        private Label  _calMonthLbl;
+        private Button _calNavHome;
+        private Label[] _calKWLabels;   // [0]="KW"-Header, [1..6]=Wochennummer-Rows
+        private Label[] _calDayCells;   // [0..41] = 6 Wochen × 7 Tage, row-major
 
-        // Spaltenbreiten
+        // Appointment-Cache — COM-Abruf nur bei Monatswechsel oder expliziter Invalidierung
+        private List<Outlook.AppointmentItem> _cachedAppts   = null;
+        private int                           _cacheYear     = -1;
+        private int                           _cacheMonth    = -1;
+        private DateTime                      _calendarBuilt = DateTime.MinValue;
+
+        // Spaltenbreiten (px)
         private const int COL_TIME = 65;
-        private const int COL_BAR  = 7;
+        private const int COL_BAR  = 10;
+
+        // Font-Cache — einmal erstellt, wiederverwendet; Dispose via DisposeCachedFonts()
+        private Font _fontBold;    // 8.5pt Bold    — Nav-Buttons, Tages-Header, fette Kalendertage
+        private Font _fontHdr;     // 8.0pt Bold    — Wochentag-Spaltenköpfe im Kalender
+        private Font _fontDay;     // 8.5pt Regular — normale Kalendertage + Wochentag-Label
+        private Font _fontKW;      // 7.5pt Regular — Kalenderwochen-Zahlen
+        private Font _fontSmall;   // 8.0pt Regular — Terminuhrzeit
+        private Font _fontItalic;  // 8.0pt Italic  — Terminort
+        private Font _fontEmoji;   // Segoe UI Emoji 8.5pt Bold — Terminbetreff (Emoji-fähig)
 
         // ══════════════════════════════════════════════════════════════════
-        // Properties (nur noch SelectedDate und Accounts von außen nutzbar)
+        // Properties
         // ══════════════════════════════════════════════════════════════════
 
         public StringCollection Accounts { get; set; }
-
-        /// <summary>Aufgabenliste ein/ausblenden (auch per Ribbon-Button togglebar)</summary>
-        public bool ShowTasks
-        {
-            get { return !splitContainer1.Panel2Collapsed; }
-            set
-            {
-                splitContainer1.Panel2Collapsed = !value;
-                if (value) RetrieveTasks();
-            }
-        }
 
         public DateTime SelectedDate
         {
@@ -94,23 +103,20 @@ namespace Outlook2021TodoAddIn
             InitializeComponent();
             _calendarMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
 
-            // FlowLayoutPanel Termine
+            InitCachedFonts();
+            InitCalendarControls();
+
             _flpAppointments = BuildFlowPanel();
             pnlAppointments.Controls.Add(_flpAppointments);
 
-            // FlowLayoutPanel Aufgaben
-            _flpTasks = BuildFlowPanel();
-            pnlTasks.Controls.Add(_flpTasks);
-
             _toolTip = new ToolTip { AutoPopDelay = 8000 };
 
-            // Resize-Debounce
+            // Resize-Debounce: 300 ms nach letztem Resize neu aufbauen
             _resizeTimer       = new System.Windows.Forms.Timer { Interval = 300 };
             _resizeTimer.Tick += (s, e) => { _resizeTimer.Stop(); if (IsHandleCreated) RetrieveData(); };
             pnlAppointments.Resize += (s, e) => { _resizeTimer.Stop(); _resizeTimer.Start(); };
-            pnlTasks.Resize        += (s, e) => { _resizeTimer.Stop(); _resizeTimer.Start(); };
 
-            // Alle 60s prüfen ob Tageswechsel stattgefunden hat
+            // Alle 60 s auf Tageswechsel prüfen
             _dayChangeTimer       = new System.Windows.Forms.Timer { Interval = 60000 };
             _dayChangeTimer.Tick += (s, e) =>
             {
@@ -118,20 +124,47 @@ namespace Outlook2021TodoAddIn
                 _lastKnownDate = DateTime.Today;
                 _selectedDate  = DateTime.Today;
                 _calendarMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
-                if (IsHandleCreated) RetrieveData();
+                if (IsHandleCreated) InvalidateAndRefresh();
             };
             _dayChangeTimer.Start();
 
-            // Accounts aus Settings laden
-            Accounts = Properties.Settings.Default.Accounts;
-
-            try
+            // Click-Timer: SingleClick erst nach DoubleClickTime ausführen damit DblClick nicht verschluckt wird
+            _clickTimer = new System.Windows.Forms.Timer
+                { Interval = SystemInformation.DoubleClickTime + 50 };
+            _clickTimer.Tick += (s, e) =>
             {
-                int sd = Properties.Settings.Default.SplitterDistance;
-                if (sd > splitContainer1.Panel1MinSize)
-                    splitContainer1.SplitterDistance = sd;
-            }
-            catch { }
+                _clickTimer.Stop();
+                _selectedDate = _pendingClickDate;
+                if (_pendingClickDate.Month != _calendarMonth.Month ||
+                    _pendingClickDate.Year  != _calendarMonth.Year)
+                    _calendarMonth = new DateTime(_pendingClickDate.Year, _pendingClickDate.Month, 1);
+                RetrieveData();
+            };
+
+            Accounts = Properties.Settings.Default.Accounts;
+        }
+
+        private void InitCachedFonts()
+        {
+            var ff    = Font.FontFamily;
+            _fontBold   = new Font(ff, 8.5f, FontStyle.Bold);
+            _fontHdr    = new Font(ff, 8.0f, FontStyle.Bold);
+            _fontDay    = new Font(ff, 8.5f, FontStyle.Regular);
+            _fontKW     = new Font(ff, 7.5f, FontStyle.Regular);
+            _fontSmall  = new Font(ff, 8.0f, FontStyle.Regular);
+            _fontItalic = new Font(ff, 8.0f, FontStyle.Italic);
+            _fontEmoji  = new Font("Segoe UI Emoji", 8.5f, FontStyle.Bold);
+        }
+
+        internal void DisposeCachedFonts()
+        {
+            _fontBold?.Dispose();   _fontBold   = null;
+            _fontHdr?.Dispose();    _fontHdr    = null;
+            _fontDay?.Dispose();    _fontDay    = null;
+            _fontKW?.Dispose();     _fontKW     = null;
+            _fontSmall?.Dispose();  _fontSmall  = null;
+            _fontItalic?.Dispose(); _fontItalic = null;
+            _fontEmoji?.Dispose();  _fontEmoji  = null;
         }
 
         private static FlowLayoutPanel BuildFlowPanel()
@@ -149,53 +182,35 @@ namespace Outlook2021TodoAddIn
         }
 
         // ══════════════════════════════════════════════════════════════════
-        // RetrieveData
+        // RetrieveData / Cache-Steuerung
         // ══════════════════════════════════════════════════════════════════
 
         public void RetrieveData()
         {
-            if (!_splitterLoaded && splitContainer1.Height > 50)
-            {
-                _splitterLoaded = true;
-                try
-                {
-                    int sd = Properties.Settings.Default.SplitterDistance;
-                    if (sd > splitContainer1.Panel1MinSize &&
-                        sd < splitContainer1.Height - splitContainer1.Panel2MinSize)
-                        splitContainer1.SplitterDistance = sd;
-                }
-                catch { }
-                _splitterReady = true;  // ab jetzt darf SplitterMoved speichern
-            }
-
             RetrieveAppointments();
+        }
 
-            if (ShowTasks)
-            {
-                splitContainer1.Panel2Collapsed = false;
-                RetrieveTasks();
-            }
-            else
-            {
-                splitContainer1.Panel2Collapsed = true;
-            }
+        // Für externe Trigger (ItemAdd/Change/Remove, Sleep/Wake, Tageswechsel):
+        // Cache löschen und komplett neu laden.
+        public void InvalidateAndRefresh()
+        {
+            _cachedAppts   = null;
+            _cacheYear     = -1;
+            _cacheMonth    = -1;
+            _calendarBuilt = DateTime.MinValue;
+            RetrieveData();
         }
 
         // ══════════════════════════════════════════════════════════════════
-        // KALENDER
+        // KALENDER — einmalige Initialisierung + schneller Property-Update
         // ══════════════════════════════════════════════════════════════════
 
-        private void BuildCalendar()
+        // Alle Controls einmal erstellen und in panelCalendar einhängen.
+        // BuildCalendar() aktualisiert danach nur noch Properties — kein GDI-Overhead.
+        private void InitCalendarControls()
         {
-            var fNav = new Font(Font.FontFamily, FS_BOLD,  FontStyle.Bold);
-            var fHdr = new Font(Font.FontFamily, FS_SMALL, FontStyle.Bold);
-            var fDay = new Font(Font.FontFamily, FS_NORMAL);
-            var fKW  = new Font(Font.FontFamily, FS_SMALL - 0.5f);
+            int rowH = _fontDay.Height + 13;
 
-            int rowH = fDay.Height + 13;
-
-            // tbl vollständig aufbauen bevor panelCalendar angefasst wird —
-            // so bleibt die alte Anzeige intakt falls hier eine Exception auftritt.
             var tbl = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, ColumnCount = 8, RowCount = 8,
@@ -209,82 +224,125 @@ namespace Outlook2021TodoAddIn
                 tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, rowH));
 
             // Zeile 0: Navigation
-            tbl.Controls.Add(CalNavBtn("<", fNav, () => { _calendarMonth = _calendarMonth.AddMonths(-1); BuildCalendar(); }), 0, 0);
-            var lm = new Label { Text = _calendarMonth.ToString("MMMM yyyy"), Font = fNav,
-                TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill, Margin = new Padding(0) };
-            tbl.Controls.Add(lm, 1, 0);
-            tbl.SetColumnSpan(lm, 6);
-            tbl.Controls.Add(CalNavBtn(">", fNav, () => { _calendarMonth = _calendarMonth.AddMonths(1); BuildCalendar(); }), 7, 0);
+            tbl.Controls.Add(CalNavBtn("<", () => { _calendarMonth = _calendarMonth.AddMonths(-1); BuildCalendar(); }), 0, 0);
 
-            // Zeile 1: Tagesnamen
-            tbl.Controls.Add(CalKWLbl("KW", fKW), 0, 1);
+            _calMonthLbl = new Label { Font = _fontBold, TextAlign = ContentAlignment.MiddleCenter, Dock = DockStyle.Fill, Margin = new Padding(0) };
+            tbl.Controls.Add(_calMonthLbl, 1, 0);
+            tbl.SetColumnSpan(_calMonthLbl, 5);
+
+            _calNavHome = CalNavBtn("⌂", () => { _selectedDate = DateTime.Today; _calendarMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1); RetrieveData(); });
+            tbl.Controls.Add(_calNavHome, 6, 0);
+
+            tbl.Controls.Add(CalNavBtn(">", () => { _calendarMonth = _calendarMonth.AddMonths(1); BuildCalendar(); }), 7, 0);
+
+            // Zeile 1: KW-Header + Tagesnamen
+            _calKWLabels = new Label[7];
+            _calKWLabels[0] = CalKWLbl("KW");
+            tbl.Controls.Add(_calKWLabels[0], 0, 1);
             string[] dn = { "Mo", "Di", "Mi", "Do", "Fr", "Sa", "So" };
-            for (int d = 0; d < 7; d++) tbl.Controls.Add(CalLbl(dn[d], fHdr, SystemColors.GrayText), d + 1, 1);
+            for (int d = 0; d < 7; d++)
+                tbl.Controls.Add(CalLbl(dn[d], _fontHdr, SystemColors.GrayText), d + 1, 1);
 
-            // Zeilen 2–7: Wochen
-            int dow = (int)_calendarMonth.DayOfWeek;
-            DateTime ws = _calendarMonth.AddDays((dow == 0) ? -6 : -(dow - 1));
-
-            for (int row = 2; row < 8; row++)
+            // Zeilen 2–7: KW-Labels + Tageszellen (werden in BuildCalendar() nur noch upgedated)
+            _calDayCells = new Label[42];
+            for (int row = 0; row < 6; row++)
             {
-                tbl.Controls.Add(CalKWLbl(GetWeekNumber(ws).ToString(), fKW), 0, row);
-                for (int col = 1; col <= 7; col++)
+                _calKWLabels[row + 1] = CalKWLbl("");
+                tbl.Controls.Add(_calKWLabels[row + 1], 0, row + 2);
+                for (int col = 0; col < 7; col++)
                 {
-                    DateTime cd   = ws.AddDays(col - 1);
-                    bool isCur    = cd.Month == _calendarMonth.Month;
-                    bool isToday  = cd.Date == DateTime.Today;
-                    bool isSel    = cd.Date == _selectedDate.Date;
-                    bool isBold   = _boldedDates.Contains(cd.Date);
-
                     var lbl = new Label
                     {
-                        Text = cd.Day.ToString(), TextAlign = ContentAlignment.MiddleCenter,
-                        Dock = DockStyle.Fill, Cursor = Cursors.Hand, Tag = cd, Margin = new Padding(0),
-                        Font = isBold ? new Font(Font.FontFamily, FS_NORMAL, FontStyle.Bold) : fDay
+                        TextAlign = ContentAlignment.MiddleCenter,
+                        Dock = DockStyle.Fill, Cursor = Cursors.Hand,
+                        Margin = new Padding(0), Font = _fontDay
                     };
-                    if      (isSel)   { lbl.BackColor = Color.LightBlue; lbl.ForeColor = Color.DarkBlue; }
-                    else if (isToday) { lbl.BackColor = Color.SteelBlue; lbl.ForeColor = Color.White; }
-                    else if (!isCur)    lbl.ForeColor = Color.DarkGray;
-
                     lbl.Click       += CalDay_Click;
                     lbl.DoubleClick += CalDay_DblClick;
-                    tbl.Controls.Add(lbl, col, row);
+                    _calDayCells[row * 7 + col] = lbl;
+                    tbl.Controls.Add(lbl, col + 1, row + 2);
                 }
-                ws = ws.AddDays(7);
             }
 
-            // Atomar tauschen: erst jetzt panelCalendar anfassen
             panelCalendar.SuspendLayout();
-            foreach (Control c in panelCalendar.Controls) c.Dispose();
-            panelCalendar.Controls.Clear();
             panelCalendar.Height = 8 * rowH + 4;
             panelCalendar.Controls.Add(tbl);
             panelCalendar.ResumeLayout();
         }
 
-        private Button CalNavBtn(string text, Font font, Action onClick)
+        // Nur Property-Updates — kein Control-Create, kein Dispose, kein Layout-Overhead.
+        private void BuildCalendar()
         {
-            var b = new Button { Text = text, FlatStyle = FlatStyle.Flat, Dock = DockStyle.Fill,
-                Font = font, Cursor = Cursors.Hand, Margin = new Padding(0),
-                BackColor = SystemColors.Window };
+            _calMonthLbl.Text     = _calendarMonth.ToString("MMMM yyyy");
+            _calNavHome.ForeColor = (_calendarMonth.Year  == DateTime.Today.Year &&
+                                     _calendarMonth.Month == DateTime.Today.Month)
+                                    ? Color.SteelBlue : SystemColors.ControlText;
+
+            int dow = (int)_calendarMonth.DayOfWeek;
+            DateTime ws = _calendarMonth.AddDays((dow == 0) ? -6 : -(dow - 1));
+
+            for (int row = 0; row < 6; row++)
+            {
+                _calKWLabels[row + 1].Text = GetWeekNumber(ws).ToString();
+                for (int col = 0; col < 7; col++)
+                {
+                    DateTime cd  = ws.AddDays(col);
+                    bool isCur   = cd.Month == _calendarMonth.Month;
+                    bool isToday = cd.Date  == DateTime.Today;
+                    bool isSel   = cd.Date  == _selectedDate.Date;
+                    bool isBold  = _boldedDates.Contains(cd.Date);
+
+                    var lbl       = _calDayCells[row * 7 + col];
+                    lbl.Text      = cd.Day.ToString();
+                    lbl.Tag       = cd;
+                    lbl.Font      = isBold ? _fontBold : _fontDay;
+                    lbl.BackColor = isSel   ? Color.LightBlue :
+                                    isToday ? Color.SteelBlue  : SystemColors.Window;
+                    lbl.ForeColor = isSel   ? Color.DarkBlue  :
+                                    isToday ? Color.White      :
+                                    !isCur  ? Color.DarkGray   : SystemColors.WindowText;
+                }
+                ws = ws.AddDays(7);
+            }
+        }
+
+        private Button CalNavBtn(string text, Action onClick, Color? foreColor = null)
+        {
+            var b = new Button
+            {
+                Text      = text,
+                FlatStyle = FlatStyle.Flat,
+                Dock      = DockStyle.Fill,
+                Font      = _fontBold,
+                Cursor    = Cursors.Hand,
+                Margin    = new Padding(0),
+                BackColor = SystemColors.Window,
+                ForeColor = foreColor ?? SystemColors.ControlText
+            };
             b.FlatAppearance.BorderSize = 0;
             b.Click += (s, e) => onClick();
             return b;
         }
 
-        private Label CalLbl(string text, Font font, Color fore)
-            => new Label { Text = text, TextAlign = ContentAlignment.MiddleCenter,
-                Dock = DockStyle.Fill, Font = font, ForeColor = fore, Margin = new Padding(0) };
+        private static Label CalLbl(string text, Font font, Color fore)
+            => new Label
+            {
+                Text      = text,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Dock      = DockStyle.Fill,
+                Font      = font,
+                ForeColor = fore,
+                Margin    = new Padding(0)
+            };
 
-        /// <summary>KW-Label mit rechtem Border-Strich</summary>
-        private Label CalKWLbl(string text, Font font)
+        private Label CalKWLbl(string text)
         {
             var lbl = new Label
             {
                 Text      = text,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Dock      = DockStyle.Fill,
-                Font      = font,
+                Font      = _fontKW,
                 ForeColor = SystemColors.GrayText,
                 Margin    = new Padding(0)
             };
@@ -304,202 +362,165 @@ namespace Outlook2021TodoAddIn
         private void CalDay_Click(object sender, EventArgs e)
         {
             if (!(sender is Label l) || !(l.Tag is DateTime d)) return;
-            _selectedDate = d;
-            if (d.Month != _calendarMonth.Month || d.Year != _calendarMonth.Year)
-                _calendarMonth = new DateTime(d.Year, d.Month, 1);
-            RetrieveData();
+            _pendingClickDate = d;
+            _clickTimer.Stop();
+            _clickTimer.Start();
         }
 
         private void CalDay_DblClick(object sender, EventArgs e)
         {
+            _clickTimer.Stop();
             if (!(sender is Label l) || !(l.Tag is DateTime d)) return;
             try
             {
-                var f = Globals.ThisAddIn.Application.Session
-                            .GetDefaultFolder(Outlook.OlDefaultFolders.olFolderCalendar) as Outlook.Folder;
-                Globals.ThisAddIn.Application.ActiveExplorer().CurrentFolder = f;
-                var cv = (Outlook.CalendarView)Globals.ThisAddIn.Application.ActiveExplorer().CurrentView;
-                cv.CalendarViewMode = Outlook.OlCalendarViewMode.olCalendarViewDay;
-                cv.GoToDate(d);
+                var appt = Globals.ThisAddIn.Application
+                               .CreateItem(Outlook.OlItemType.olAppointmentItem)
+                               as Outlook.AppointmentItem;
+                appt.Start = d.Date.AddHours(DateTime.Now.Hour).AddMinutes(DateTime.Now.Minute);
+                appt.End   = appt.Start.AddHours(1);
+                appt.Display(true);
+                InvalidateAndRefresh();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                MessageBox.Show("DblClick: " + ex.Message, "AddIn-Fehler");
+            }
         }
 
         // ══════════════════════════════════════════════════════════════════
-        // TERMINE
+        // TERMINE — Datenabruf
         // ══════════════════════════════════════════════════════════════════
 
         private void RetrieveAppointments()
         {
-            var appts = new List<Outlook.AppointmentItem>();
-            foreach (Outlook.Store store in Globals.ThisAddIn.Application.Session.Stores)
-                if (Accounts == null || Accounts.Count == 0 || Accounts.Contains(store.DisplayName))
-                    appts.AddRange(RetrieveAppointmentsForFolder(
-                        store.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderCalendar) as Outlook.Folder));
+            // COM-Roundtrip nur wenn Cache leer oder anderer Monat gewählt
+            bool cacheStale = _cachedAppts == null
+                              || _cacheYear  != _selectedDate.Year
+                              || _cacheMonth != _selectedDate.Month;
 
-            appts.Sort(CompareAppointments);
-            _boldedDates = new HashSet<DateTime>(appts.Select(a => a.Start.Date).Distinct());
-            BuildCalendar();
-
-            DateTime start   = _selectedDate.Date;
-            DateTime cutoff  = _selectedDate.Date;   // Termine ausblenden wenn End < cutoff
-            if (!CFG_SHOW_PAST_APPTS && start == DateTime.Today)
-                cutoff = DateTime.Now;   // Heute: erst ausblenden wenn Termin-Ende vorbei
-
-            BuildItemsPanel(_flpAppointments, pnlAppointments,
-                appts.Where(a => a.End >= cutoff && a.Start <= start.AddDays((double)CFG_NUM_DAYS))
-                     .Cast<object>().ToList(),
-                isTask: false);
-        }
-
-        // ══════════════════════════════════════════════════════════════════
-        // AUFGABEN
-        // ══════════════════════════════════════════════════════════════════
-
-        private void RetrieveTasks()
-        {
-            var tasks = new List<OLTaskItem>();
-            foreach (Outlook.Store store in Globals.ThisAddIn.Application.Session.Stores)
-                if (Accounts == null || Accounts.Count == 0 || Accounts.Contains(store.DisplayName))
-                    tasks.AddRange(RetrieveTasksForFolder(
-                        store.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderToDo) as Outlook.Folder));
-
-            if (!CFG_SHOW_COMPLETED_TASKS) tasks = tasks.Where(t => !t.Completed).ToList();
-            tasks.Sort(CompareTasks);
-
-            BuildItemsPanel(_flpTasks, pnlTasks,
-                tasks.Cast<object>().ToList(),
-                isTask: true);
-        }
-
-        private List<OLTaskItem> RetrieveTasksForFolder(Outlook.Folder f)
-        {
-            var t = new List<OLTaskItem>();
-            if (f == null) return t;
-            foreach (object item in f.Items) try { t.Add(new OLTaskItem(item)); } catch { }
-            return t.Where(x => x.ValidTaskItem).ToList();
-        }
-
-        // ══════════════════════════════════════════════════════════════════
-        // GEMEINSAMES PANEL-BUILDER (Termine + Aufgaben)
-        // ══════════════════════════════════════════════════════════════════
-
-        /// <summary>
-        /// Baut FlowLayoutPanel mit Datum-Headern + Eintrags-Tabellen.
-        /// items enthält entweder Outlook.AppointmentItem oder OLTaskItem.
-        /// </summary>
-        private void BuildItemsPanel(FlowLayoutPanel flp, Panel container,
-            List<object> items, bool isTask)
-        {
-            flp.SuspendLayout();
-            var old = flp.Controls.Cast<Control>().ToList();
-            flp.Controls.Clear();
-            foreach (var c in old) c.Dispose();
-
-            if (items.Count == 0) { flp.ResumeLayout(); return; }
-
-            int panelH = container.ClientSize.Height - 49;   // -49px: Outlook-Statusbalken
-            if (panelH <= 0) panelH = 400;
-            int w = Math.Max(container.ClientSize.Width - 2, 100);
-
-            using (var fBold = new Font(Font.FontFamily, FS_BOLD, FontStyle.Bold))
+            if (cacheStale)
             {
-                int rowH    = fBold.Height + 6;
-                int hdrH    = rowH + 2;
-                int spacerH = 2;
-                int usedH   = 0;
-                int lastDay = -1, lastYear = -1;
+                var appts = new List<Outlook.AppointmentItem>();
+                foreach (Outlook.Store store in Globals.ThisAddIn.Application.Session.Stores)
+                    if (Accounts == null || Accounts.Count == 0 || Accounts.Contains(store.DisplayName))
+                        appts.AddRange(RetrieveAppointmentsForFolder(
+                            store.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderCalendar) as Outlook.Folder));
 
-                foreach (var item in items)
-                {
-                    DateTime itemDate;
-                    bool hasSecondLine;
-
-                    if (isTask)
-                    {
-                        var t = (OLTaskItem)item;
-                        itemDate      = t.DueDate.Year == Constants.NullYear ? DateTime.MaxValue : t.DueDate.Date;
-                        hasSecondLine = false;
-                    }
-                    else
-                    {
-                        var a = (Outlook.AppointmentItem)item;
-                        itemDate      = a.Start.Date;
-                        hasSecondLine = !string.IsNullOrEmpty(a.Location);
-                    }
-
-                    bool newDay = itemDate == DateTime.MaxValue
-                        ? (lastDay != -2)
-                        : (itemDate.Day != lastDay || itemDate.Year != lastYear);
-
-                    int needed = (newDay ? hdrH : 0) + (hasSecondLine ? 2 : 1) * rowH + spacerH;
-                    if (usedH + needed > panelH) break;
-
-                    if (newDay)
-                    {
-                        if (itemDate == DateTime.MaxValue)
-                        {
-                            lastDay = -2; lastYear = -2;
-                            flp.Controls.Add(BuildGroupHeader("Kein Fälligkeitsdatum", w, hdrH));
-                        }
-                        else
-                        {
-                            lastDay = itemDate.Day; lastYear = itemDate.Year;
-                            flp.Controls.Add(BuildGroupHeader(FormatDateHeader(itemDate), w, hdrH));
-                        }
-                        usedH += hdrH;
-                    }
-
-                    if (isTask)
-                        flp.Controls.Add(BuildTaskEntry((OLTaskItem)item, w, rowH));
-                    else
-                        flp.Controls.Add(BuildAppointmentEntry((Outlook.AppointmentItem)item, w, rowH));
-
-                    usedH += (hasSecondLine ? 2 : 1) * rowH;
-
-                    flp.Controls.Add(new Panel { Height = spacerH, Width = w, BackColor = SystemColors.Window });
-                    usedH += spacerH;
-                }
+                appts.Sort(CompareAppointments);
+                _cachedAppts = appts;
+                _cacheYear   = _selectedDate.Year;
+                _cacheMonth  = _selectedDate.Month;
+                _boldedDates = new HashSet<DateTime>(appts.Select(a => a.Start.Date).Distinct());
             }
 
-            flp.ResumeLayout();
+            // Kalender nur neu aufbauen wenn Monat wechselt oder frische Daten vorliegen
+            if (cacheStale || _calendarBuilt != _calendarMonth)
+            {
+                BuildCalendar();
+                _calendarBuilt = _calendarMonth;
+            }
+
+            DateTime start  = _selectedDate.Date;
+            // Heute: vergangene Termine ausblenden sobald End < jetzt; andere Tage: ab Tagesbeginn
+            DateTime cutoff = (start == DateTime.Today) ? DateTime.Now : start;
+
+            BuildItemsPanel(
+                _cachedAppts.Where(a => a.End >= cutoff && a.Start <= start.AddDays(90))
+                            .ToList());
+        }
+
+        private List<Outlook.AppointmentItem> RetrieveAppointmentsForFolder(Outlook.Folder cal)
+        {
+            var start = new DateTime(_selectedDate.Year, _selectedDate.Month, 1);
+            var end   = start.AddMonths(1).AddDays(-1).AddDays(90);
+            var range = GetAppointmentsInRange(cal, start, end);
+            var list  = new List<Outlook.AppointmentItem>();
+            if (range != null) foreach (Outlook.AppointmentItem a in range) list.Add(a);
+            return list;
+        }
+
+        private Outlook.Items GetAppointmentsInRange(Outlook.Folder folder, DateTime start, DateTime end)
+        {
+            // Outlook DASL-Filter erwartet MM/dd/yyyy HH:mm (invariant) — Systemsprache ignorieren
+            string f = "[Start] >= '" + start.ToString("MM/dd/yyyy HH:mm", CultureInfo.InvariantCulture) + "'" +
+                       " AND [End] <= '" + end.ToString("MM/dd/yyyy HH:mm", CultureInfo.InvariantCulture) + "'";
+            try
+            {
+                var i = folder.Items;
+                i.IncludeRecurrences = true;
+                i.Sort("[Start]", Type.Missing);
+                var r = i.Restrict(f);
+                return r.Count > 0 ? r : null;
+            }
+            catch { return null; }
+        }
+
+        private static int CompareAppointments(Outlook.AppointmentItem x, Outlook.AppointmentItem y)
+            => x.Start.CompareTo(y.Start);
+
+        // ══════════════════════════════════════════════════════════════════
+        // TERMINLISTE — Darstellung
+        // ══════════════════════════════════════════════════════════════════
+
+        private void BuildItemsPanel(List<Outlook.AppointmentItem> appts)
+        {
+            _flpAppointments.SuspendLayout();
+            var old = _flpAppointments.Controls.Cast<Control>().ToList();
+            _flpAppointments.Controls.Clear();
+            foreach (var c in old) c.Dispose();
+
+            if (appts.Count == 0) { _flpAppointments.ResumeLayout(); return; }
+
+            int panelH = pnlAppointments.ClientSize.Height - 49;   // -49: Outlook-Statusbalken
+            if (panelH <= 0) panelH = 400;
+            int w = Math.Max(pnlAppointments.ClientSize.Width - 2, 100);
+
+            int rowH    = _fontBold.Height + 6;
+            int hdrH    = rowH + 2;
+            int spacerH = 2;
+            int usedH   = 0;
+            int lastDay = -1, lastYear = -1;
+
+            foreach (var appt in appts)
+            {
+                DateTime itemDate = appt.Start.Date;
+                bool     hasLoc   = !string.IsNullOrEmpty(appt.Location);
+
+                bool newDay = itemDate.Day != lastDay || itemDate.Year != lastYear;
+                int needed  = (newDay ? hdrH : 0) + (hasLoc ? 2 : 1) * rowH + spacerH;
+                if (usedH + needed > panelH) break;
+
+                if (newDay)
+                {
+                    lastDay = itemDate.Day; lastYear = itemDate.Year;
+                    var (dateText, weekdayText) = FormatDateHeader(itemDate);
+                    _flpAppointments.Controls.Add(BuildGroupHeader(dateText, weekdayText, w, hdrH));
+                    usedH += hdrH;
+                }
+
+                _flpAppointments.Controls.Add(BuildAppointmentEntry(appt, w, rowH));
+                usedH += (hasLoc ? 2 : 1) * rowH;
+
+                _flpAppointments.Controls.Add(new Panel { Height = spacerH, Width = w, BackColor = SystemColors.Window });
+                usedH += spacerH;
+            }
+
+            _flpAppointments.ResumeLayout();
         }
 
         // ── Datum/Gruppen-Header ──────────────────────────────────────────
 
-        private string FormatDateHeader(DateTime date)
+        private (string dateText, string weekdayText) FormatDateHeader(DateTime date)
         {
             int diff = (int)(date - DateTime.Today).TotalDays;
             string prefix = diff == -1 ? Constants.Yesterday + ":  " :
                             diff ==  0 ? Constants.Today     + ":  " :
                             diff ==  1 ? Constants.Tomorrow  + ":  " : "";
-            string text = date.ToShortDateString();
-            if (CFG_SHOW_DAY_NAMES) text += "§" + date.ToString("dddd");
-            return prefix + text;
+            return (prefix + date.ToShortDateString(), date.ToString("dddd"));
         }
 
-        private Control BuildGroupHeader(string text, int width, int height)
+        private Control BuildGroupHeader(string dateText, string weekdayText, int width, int height)
         {
-            int sep = text.IndexOf('§');
-            if (sep < 0)
-            {
-                return new Label
-                {
-                    Text      = text,
-                    Font      = new Font(Font.FontFamily, FS_BOLD, FontStyle.Bold),
-                    BackColor = SystemColors.Window,
-                    ForeColor = Color.FromArgb(40, 60, 100),
-                    Width     = width,
-                    Height    = height,
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Padding   = new Padding(4, 0, 0, 0),
-                    Margin    = new Padding(0)
-                };
-            }
-
-            string datePart    = text.Substring(0, sep);
-            string weekdayPart = text.Substring(sep + 1);
-
             var pnl = new Panel
             {
                 Width     = width,
@@ -511,20 +532,19 @@ namespace Outlook2021TodoAddIn
 
             var lblDate = new Label
             {
-                Text      = datePart,
-                Font      = new Font(Font.FontFamily, FS_BOLD, FontStyle.Bold),
+                Text      = dateText,
+                Font      = _fontBold,
                 ForeColor = Color.FromArgb(40, 60, 100),
                 BackColor = Color.Transparent,
                 AutoSize  = true,
                 Height    = height,
                 TextAlign = ContentAlignment.MiddleLeft,
-                Location  = new System.Drawing.Point(4, 0)
+                Location  = new Point(4, 0)
             };
-
             var lblDay = new Label
             {
-                Text      = weekdayPart,
-                Font      = new Font(Font.FontFamily, FS_NORMAL, FontStyle.Regular),
+                Text      = weekdayText,
+                Font      = _fontDay,
                 ForeColor = Color.FromArgb(40, 60, 100),
                 BackColor = Color.Transparent,
                 AutoSize  = true,
@@ -535,34 +555,29 @@ namespace Outlook2021TodoAddIn
             pnl.Controls.Add(lblDate);
             pnl.Controls.Add(lblDay);
 
-            lblDate.Width    = System.Windows.Forms.TextRenderer.MeasureText(datePart, lblDate.Font).Width;
-            lblDay.Location  = new System.Drawing.Point(lblDate.Left + lblDate.Width + 4, 0);
+            lblDate.Width   = TextRenderer.MeasureText(dateText, _fontBold).Width;
+            lblDay.Location = new Point(lblDate.Left + lblDate.Width + 4, 0);
 
             return pnl;
         }
 
         // ── Termin-Eintrag ────────────────────────────────────────────────
 
-        /// <summary>
-        /// Type 1 (mit Ort): Zeile A = Zeit|Balken(rowspan2)|Titel  /  Zeile B = leer|–|Ort
-        /// Type 2 (kein Ort): Zeile A = Zeit|Balken|Titel
-        /// </summary>
-        private TableLayoutPanel BuildAppointmentEntry(
-            Outlook.AppointmentItem appt, int width, int rowH)
+        private TableLayoutPanel BuildAppointmentEntry(Outlook.AppointmentItem appt, int width, int rowH)
         {
-            bool  hasLoc  = !string.IsNullOrEmpty(appt.Location);
+            bool  hasLoc   = !string.IsNullOrEmpty(appt.Location);
             Color barColor = GetApptBarColor(appt);
-            Color tint     = Color.FromArgb(30, barColor.R, barColor.G, barColor.B);
-            var   tbl      = BuildEntryTable(width, rowH, hasLoc ? 2 : 1, tint);
+            var   tbl      = BuildEntryTable(width, rowH, hasLoc ? 2 : 1);
 
-            // Zeile 0
             tbl.Controls.Add(new Label
             {
-                Text = appt.AllDayEvent ? "" : appt.Start.ToShortTimeString(),
-                Font = new Font(Font.FontFamily, FS_SMALL),
+                Text      = appt.AllDayEvent ? "" : appt.Start.ToShortTimeString(),
+                Font      = _fontSmall,
                 TextAlign = ContentAlignment.MiddleLeft,
-                Dock = DockStyle.Fill, AutoEllipsis = false,
-                Padding = new Padding(15, 0, 2, 0), Margin = new Padding(0)
+                Dock      = DockStyle.Fill,
+                AutoEllipsis = false,
+                Padding   = new Padding(15, 0, 2, 0),
+                Margin    = new Padding(0)
             }, 0, 0);
 
             var bar = new Panel { BackColor = barColor, Dock = DockStyle.Fill, Margin = new Padding(0) };
@@ -571,133 +586,81 @@ namespace Outlook2021TodoAddIn
 
             tbl.Controls.Add(new Label
             {
-                Text = appt.Subject ?? "", Font = new Font("Segoe UI Emoji", FS_BOLD, FontStyle.Bold),
-                TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill, AutoEllipsis = true,
-                Padding = new Padding(4, 0, 2, 0), Margin = new Padding(0)
+                Text      = appt.Subject ?? "",
+                Font      = _fontEmoji,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Dock      = DockStyle.Fill,
+                AutoEllipsis = true,
+                Padding   = new Padding(4, 0, 2, 0),
+                Margin    = new Padding(0)
             }, 2, 0);
 
-            // Zeile 1 (nur Type 1)
             if (hasLoc)
             {
                 tbl.Controls.Add(new Label { Margin = new Padding(0) }, 0, 1);
                 tbl.Controls.Add(new Label
                 {
-                    Text = appt.Location, Font = new Font(Font.FontFamily, FS_SMALL, FontStyle.Italic),
-                    TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill, AutoEllipsis = true,
-                    ForeColor = SystemColors.GrayText, Padding = new Padding(4, 0, 2, 0), Margin = new Padding(0)
+                    Text      = appt.Location,
+                    Font      = _fontItalic,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Dock      = DockStyle.Fill,
+                    AutoEllipsis = true,
+                    ForeColor = SystemColors.GrayText,
+                    Padding   = new Padding(4, 0, 2, 0),
+                    Margin    = new Padding(0)
                 }, 2, 1);
             }
 
             TintChildren(tbl);
-            AttachEvents(tbl, appt, null, BuildApptTooltip(appt));
+            AttachEvents(tbl, appt, BuildApptTooltip(appt));
             return tbl;
         }
 
-        // ── Aufgaben-Eintrag (gleiches Template wie Termin Type 2) ────────
-
-        private TableLayoutPanel BuildTaskEntry(OLTaskItem task, int width, int rowH)
-        {
-            Color barColor = GetTaskBarColor(task);
-            Color tint     = Color.FromArgb(30, barColor.R, barColor.G, barColor.B);
-            var   tbl      = BuildEntryTable(width, rowH, 1, tint);
-
-            // Zeile 0: Fälligkeit | Balken | Betreff
-            string timeText = task.DueDate.Year == Constants.NullYear
-                ? "" : task.DueDate.ToShortDateString();
-
-            tbl.Controls.Add(new Label
-            {
-                Text = timeText, Font = new Font(Font.FontFamily, FS_SMALL),
-                TextAlign = ContentAlignment.MiddleLeft,
-                Dock = DockStyle.Fill, AutoEllipsis = false,
-                Padding = new Padding(4, 0, 2, 0), Margin = new Padding(0),
-                ForeColor = SystemColors.GrayText
-            }, 0, 0);
-
-            var bar = new Panel { BackColor = barColor, Dock = DockStyle.Fill, Margin = new Padding(0) };
-            tbl.Controls.Add(bar, 1, 0);
-
-            var subjectFont = task.Completed
-                ? new Font("Segoe UI Emoji", FS_BOLD, FontStyle.Bold | FontStyle.Strikeout)
-                : new Font("Segoe UI Emoji", FS_BOLD, FontStyle.Bold);
-
-            tbl.Controls.Add(new Label
-            {
-                Text = task.TaskSubject ?? "", Font = subjectFont,
-                TextAlign = ContentAlignment.MiddleLeft, Dock = DockStyle.Fill, AutoEllipsis = true,
-                Padding = new Padding(4, 0, 2, 0), Margin = new Padding(0)
-            }, 2, 0);
-
-            TintChildren(tbl);
-            AttachEvents(tbl, null, task, BuildTaskTooltip(task));
-            return tbl;
-        }
-
-        // ── Entry-Tabelle (shared) ────────────────────────────────────────
-
-        private TableLayoutPanel BuildEntryTable(int width, int rowH, int rows, Color tint)
+        private TableLayoutPanel BuildEntryTable(int width, int rowH, int rows)
         {
             var tbl = new TableLayoutPanel
             {
-                ColumnCount = 3, RowCount = rows, Width = width, Height = rows * rowH,
-                Padding = new Padding(0), Margin = new Padding(0),
+                ColumnCount     = 3,
+                RowCount        = rows,
+                Width           = width,
+                Height          = rows * rowH,
+                Padding         = new Padding(0),
+                Margin          = new Padding(0),
                 CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
-                BackColor = SystemColors.Window   // kein Tint auf Container
+                BackColor       = SystemColors.Window
             };
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, COL_TIME));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, COL_BAR));
-            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,  100));
             for (int r = 0; r < rows; r++)
                 tbl.RowStyles.Add(new RowStyle(SizeType.Absolute, rowH));
             return tbl;
         }
 
-        /// <summary>Labels transparent färben außer Spalte 0 (Zeit/Datum) und Panel (Balken)</summary>
         private static void TintChildren(TableLayoutPanel tbl)
         {
-            // tbl selbst bekommt Window als Hintergrund - kein Tint auf dem Container
             tbl.BackColor = SystemColors.Window;
             foreach (Control c in tbl.Controls)
             {
-                if (c is Panel) continue;           // Farbbalken — nicht ändern
-                if (tbl.GetColumn(c) == 0)
-                    c.BackColor = SystemColors.Window;  // Zeit-/Datumzelle bleibt weiß
-                else
-                    c.BackColor = Color.Transparent;
+                if (c is Panel) continue;                               // Farbbalken — nicht anfassen
+                c.BackColor = tbl.GetColumn(c) == 0 ? SystemColors.Window : Color.Transparent;
             }
         }
 
-        // ── Events anhängen ───────────────────────────────────────────────
+        // ── Events + Tooltip ─────────────────────────────────────────────
 
-        private void AttachEvents(Control ctrl,
-            Outlook.AppointmentItem appt, OLTaskItem task, string tooltip)
+        private void AttachEvents(Control ctrl, Outlook.AppointmentItem appt, string tooltip)
         {
             _toolTip.SetToolTip(ctrl, tooltip);
-
-            if (appt != null)
+            ctrl.DoubleClick += (s, e) => OpenAppt(appt);
+            ctrl.MouseUp     += (s, e) =>
             {
-                ctrl.DoubleClick += (s, e) => OpenAppt(appt);
-                ctrl.MouseUp     += (s, e) =>
-                {
-                    if (((MouseEventArgs)e).Button == MouseButtons.Right)
+                if (((MouseEventArgs)e).Button == MouseButtons.Right)
                     { _contextMenuAppt = appt; ctxMenuAppointments.Show(ctrl, ((MouseEventArgs)e).Location); }
-                };
-            }
-            else if (task != null)
-            {
-                ctrl.DoubleClick += (s, e) => OpenTask(task);
-                ctrl.MouseUp     += (s, e) =>
-                {
-                    if (((MouseEventArgs)e).Button == MouseButtons.Right)
-                    { _contextMenuTask = task; ctxMenuTasks.Show(ctrl, ((MouseEventArgs)e).Location); }
-                };
-            }
-
+            };
             foreach (Control child in ctrl.Controls)
-                AttachEvents(child, appt, task, tooltip);
+                AttachEvents(child, appt, tooltip);
         }
-
-        // ── Tooltips ─────────────────────────────────────────────────────
 
         private string BuildApptTooltip(Outlook.AppointmentItem appt)
         {
@@ -712,17 +675,7 @@ namespace Outlook2021TodoAddIn
             return s;
         }
 
-        private string BuildTaskTooltip(OLTaskItem task)
-        {
-            string s = task.TaskSubject ?? "";
-            if (task.DueDate.Year  != Constants.NullYear) s += "\nFällig: " + task.DueDate.ToShortDateString();
-            if (task.StartDate.Year != Constants.NullYear) s += "\nStart: "  + task.StartDate.ToShortDateString();
-            if (task.Reminder.Year  != Constants.NullYear) s += "\nErinnerung: " + task.Reminder;
-            s += "\nOrdner: " + task.FolderName;
-            return s;
-        }
-
-        // ── Farben ────────────────────────────────────────────────────────
+        // ── Termin öffnen ─────────────────────────────────────────────────
 
         private Color GetApptBarColor(Outlook.AppointmentItem appt)
         {
@@ -742,18 +695,8 @@ namespace Outlook2021TodoAddIn
             }
         }
 
-        private Color GetTaskBarColor(OLTaskItem task)
-        {
-            foreach (string cat in task.Categories)
-            {
-                var c = Globals.ThisAddIn.Application.Session.Categories[cat] as Outlook.Category;
-                if (c != null) return TranslateCategoryColor(c.Color);
-            }
-            return Color.SteelBlue;
-        }
-
         // ══════════════════════════════════════════════════════════════════
-        // Termin öffnen / Context-Menu Termine
+        // Context-Menu Termine
         // ══════════════════════════════════════════════════════════════════
 
         private void OpenAppt(Outlook.AppointmentItem appt)
@@ -767,10 +710,13 @@ namespace Outlook2021TodoAddIn
                     Message = "This is one appointment in a series. What do you want to open?"
                 };
                 if (f.ShowDialog() == DialogResult.OK)
-                { if (f.OpenRecurring) ((Outlook.AppointmentItem)appt.Parent).Display(true); else appt.Display(true); }
+                {
+                    if (f.OpenRecurring) ((Outlook.AppointmentItem)appt.Parent).Display(true);
+                    else                 appt.Display(true);
+                }
             }
             else appt.Display(true);
-            RetrieveAppointments();
+            InvalidateAndRefresh();
         }
 
         private void mnuItemReplyAllEmail_Click(object sender, EventArgs e)
@@ -779,8 +725,11 @@ namespace Outlook2021TodoAddIn
             var mail = Globals.ThisAddIn.Application.CreateItem(Outlook.OlItemType.olMailItem) as Outlook.MailItem;
             string cur = OutlookHelper.GetEmailAddress(Globals.ThisAddIn.Application.Session.CurrentUser);
             foreach (Outlook.Recipient r in _contextMenuAppt.Recipients)
-            { string a = OutlookHelper.GetEmailAddress(r); if (cur != a) mail.Recipients.Add(a); }
-            mail.Body = "\n\n" + _contextMenuAppt.Body;
+            {
+                string a = OutlookHelper.GetEmailAddress(r);
+                if (cur != a) mail.Recipients.Add(a);
+            }
+            mail.Body    = "\n\n" + _contextMenuAppt.Body;
             mail.Subject = Constants.SubjectRE + ": " + _contextMenuAppt.Subject;
             mail.Display();
         }
@@ -790,88 +739,22 @@ namespace Outlook2021TodoAddIn
             if (_contextMenuAppt == null) return;
             if (_contextMenuAppt.IsRecurring)
             {
-                var f = new FormRecurringOpen { Title = "Warning: Delete Recurring Item",
-                    Message = "This is one appointment in a series. What do you want to delete?" };
+                var f = new FormRecurringOpen
+                {
+                    Title   = "Warning: Delete Recurring Item",
+                    Message = "This is one appointment in a series. What do you want to delete?"
+                };
                 if (f.ShowDialog() == DialogResult.OK)
-                { if (f.OpenRecurring) ((Outlook.AppointmentItem)_contextMenuAppt.Parent).Delete(); else _contextMenuAppt.Delete(); }
+                {
+                    if (f.OpenRecurring) ((Outlook.AppointmentItem)_contextMenuAppt.Parent).Delete();
+                    else                 _contextMenuAppt.Delete();
+                }
             }
             else if (MessageBox.Show("Termin wirklich löschen?",
                          "Termin löschen", MessageBoxButtons.YesNo) == DialogResult.Yes)
                 _contextMenuAppt.Delete();
-            RetrieveAppointments();
+            InvalidateAndRefresh();
         }
-
-        // ══════════════════════════════════════════════════════════════════
-        // Aufgabe öffnen / Context-Menu Aufgaben
-        // ══════════════════════════════════════════════════════════════════
-
-        private void OpenTask(OLTaskItem task)
-        {
-            if (task == null) return;
-            if      (task.OriginalItem is Outlook.MailItem m)    m.Display(true);
-            else if (task.OriginalItem is Outlook.ContactItem co) co.Display(true);
-            else if (task.OriginalItem is Outlook.TaskItem ti)   ti.Display(true);
-            RetrieveTasks();
-        }
-
-        private void mnuItemMarkComplete_Click(object sender, EventArgs e)
-        {
-            if (_contextMenuTask == null || _contextMenuTask.Completed) return;
-            if (MessageBox.Show("Aufgabe als erledigt markieren?",
-                    "Erledigt", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
-            if      (_contextMenuTask.OriginalItem is Outlook.MailItem m)    m.ClearTaskFlag();
-            else if (_contextMenuTask.OriginalItem is Outlook.ContactItem co) co.ClearTaskFlag();
-            else if (_contextMenuTask.OriginalItem is Outlook.TaskItem ti)   ti.MarkComplete();
-            RetrieveTasks();
-        }
-
-        private void mnuItemDeleteTask_Click(object sender, EventArgs e)
-        {
-            if (_contextMenuTask == null) return;
-            if (MessageBox.Show("Aufgabe wirklich löschen?",
-                    "Aufgabe löschen", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
-            if      (_contextMenuTask.OriginalItem is Outlook.MailItem m)    m.Delete();
-            else if (_contextMenuTask.OriginalItem is Outlook.ContactItem co) co.Delete();
-            else if (_contextMenuTask.OriginalItem is Outlook.TaskItem ti)   ti.Delete();
-            RetrieveTasks();
-        }
-
-        // ══════════════════════════════════════════════════════════════════
-        // Splitter
-        // ══════════════════════════════════════════════════════════════════
-
-        private void splitContainer1_SplitterMoved(object sender, SplitterEventArgs e)
-        {
-            if (!_splitterReady) return;
-            Properties.Settings.Default.SplitterDistance = splitContainer1.SplitterDistance;
-            Properties.Settings.Default.Save();
-        }
-
-        // ══════════════════════════════════════════════════════════════════
-        // Outlook-Datenabruf
-        // ══════════════════════════════════════════════════════════════════
-
-        private List<Outlook.AppointmentItem> RetrieveAppointmentsForFolder(Outlook.Folder cal)
-        {
-            var start = new DateTime(_selectedDate.Year, _selectedDate.Month, 1);
-            var end   = start.AddMonths(1).AddDays(-1).AddDays((double)CFG_NUM_DAYS);
-            var range = GetAppointmentsInRange(cal, start, end);
-            var list  = new List<Outlook.AppointmentItem>();
-            if (range != null) foreach (Outlook.AppointmentItem a in range) list.Add(a);
-            return list;
-        }
-
-        private Outlook.Items GetAppointmentsInRange(Outlook.Folder folder, DateTime start, DateTime end)
-        {
-            string f = $"[Start] >= '{start:g}' AND [End] <= '{end:g}'";
-            try { var i = folder.Items; i.IncludeRecurrences = true; i.Sort("[Start]", Type.Missing); var r = i.Restrict(f); return r.Count > 0 ? r : null; }
-            catch { return null; }
-        }
-
-        private static int CompareAppointments(Outlook.AppointmentItem x, Outlook.AppointmentItem y)
-            => x.Start.CompareTo(y.Start);
-        private static int CompareTasks(OLTaskItem x, OLTaskItem y)
-            => x.DueDate.CompareTo(y.DueDate);
 
         // ══════════════════════════════════════════════════════════════════
         // Kategorie-Farben

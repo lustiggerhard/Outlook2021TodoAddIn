@@ -9,25 +9,12 @@ namespace Outlook2021TodoAddIn
         {
             if (Globals.ThisAddIn != null && Globals.ThisAddIn.ToDoTaskPane != null)
                 btnToggleTodo.Checked = Globals.ThisAddIn.ToDoTaskPane.Visible;
-            if (Globals.ThisAddIn != null && Globals.ThisAddIn.AppControl != null)
-                btnToggleTasks.Checked = Globals.ThisAddIn.AppControl.ShowTasks;
         }
 
         private void btnToggleTodo_Click(object sender, RibbonControlEventArgs e)
         {
             if (Globals.ThisAddIn != null && Globals.ThisAddIn.ToDoTaskPane != null)
                 Globals.ThisAddIn.ToDoTaskPane.Visible = btnToggleTodo.Checked;
-        }
-
-        private void btnToggleTasks_Click(object sender, RibbonControlEventArgs e)
-        {
-            if (Globals.ThisAddIn != null && Globals.ThisAddIn.AppControl != null)
-            {
-                Globals.ThisAddIn.AppControl.ShowTasks = btnToggleTasks.Checked;
-                Properties.Settings.Default.ShowTasks = btnToggleTasks.Checked;
-                Properties.Settings.Default.Save();
-                Globals.ThisAddIn.AppControl.RetrieveData();
-            }
         }
     }
 }

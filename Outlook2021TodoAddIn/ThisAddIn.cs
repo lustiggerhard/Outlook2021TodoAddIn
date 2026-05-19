@@ -2,15 +2,19 @@
  * @file    ThisAddIn.cs
  * @brief   VSTO Add-In Einstiegspunkt.
  * @author  Gerhard Lustig <gerhard@lustig.at>
- * @version 1.5.0
- * @date    2026-05-03
+ * @version 1.7.0
+ * @date    2026-05-19
  * @history
+ *   1.7.0  2026-05-19  ItemAdd/Change/Remove + TryResumeRefresh rufen jetzt
+ *                      InvalidateAndRefresh() statt RetrieveData() — Cache wird
+ *                      bei externen Datenänderungen korrekt geleert.
+ *   1.6.0  2026-05-19  Task-Panel entfernt (ShowTasks weg); appControl_SizeChanged
+ *                      debounced via _widthTimer (500 ms) statt direktem Save pro Pixel.
  *   1.5.0  2026-05-03  _isShuttingDown: verhindert dass VSTO-Cleanup den Visible-State
- *                      nach Application_Quit überschreibt (Panel war nach Neustart weg).
+ *                      nach Application_Quit überschreibt.
  *   1.4.0  2026-05-03  OnPowerModeChanged: Retry-Logik nach Resume (max. 3 Versuche,
  *                      erster Versuch nach 5s, Folge-Versuche nach je 10s).
- *   1.3.0  2026-04-24  PowerModeChanged: bei Resume nach Sleep/Hibernate
- *                      wird nach 2s neu gezeichnet und RetrieveData() aufgerufen.
+ *   1.3.0  2026-04-24  PowerModeChanged: bei Resume nach Sleep/Hibernate neu aufbauen.
  *   1.2.0  2026-04-23  Explorer_Activate: Visible-State wiederherstellen.
  *   1.1.0  2026-04-20  Initiale Version mit Refresh-Timer und Kalender-Events.
  */
@@ -26,21 +30,19 @@ namespace Outlook2021TodoAddIn
     {
         public AppointmentsControl AppControl { get; set; }
         public Microsoft.Office.Tools.CustomTaskPane ToDoTaskPane { get; set; }
-        private bool _taskPaneCreated  = false;
-        private bool _isShuttingDown   = false;
+        private bool _taskPaneCreated = false;
+        private bool _isShuttingDown  = false;
         private System.Windows.Forms.Timer _refreshTimer;
+        private System.Windows.Forms.Timer _widthTimer;
 
         private void ThisAddIn_Startup(object sender, System.EventArgs e)
         {
             try
             {
                 this.AddRegistryNotification();
-
-                // PowerModeChanged: nach Sleep/Hibernate neu aufbauen
                 SystemEvents.PowerModeChanged += OnPowerModeChanged;
 
-                var startupTimer = new System.Windows.Forms.Timer();
-                startupTimer.Interval = 1000;
+                var startupTimer = new System.Windows.Forms.Timer { Interval = 1000 };
                 startupTimer.Tick += (s, ev) =>
                 {
                     startupTimer.Stop();
@@ -51,7 +53,7 @@ namespace Outlook2021TodoAddIn
             }
             catch (Exception exc)
             {
-                MessageBox.Show(String.Format("Error starting Calendar AddIn: {0}", exc.ToString()));
+                MessageBox.Show(string.Format("Error starting Calendar AddIn: {0}", exc.ToString()));
             }
         }
 
@@ -62,7 +64,7 @@ namespace Outlook2021TodoAddIn
         }
 
         // Nach Resume: erst nach 5s versuchen (MAPI/Exchange braucht Zeit).
-        // Bei Fehler (z.B. Exchange noch nicht bereit) bis zu retriesLeft-mal nach 10s wiederholen.
+        // Bei Fehler bis zu retriesLeft-mal nach 10s wiederholen.
         private void TryResumeRefresh(int delayMs, int retriesLeft)
         {
             var t = new System.Windows.Forms.Timer { Interval = delayMs };
@@ -75,7 +77,7 @@ namespace Outlook2021TodoAddIn
                     if (AppControl == null || !AppControl.IsHandleCreated) return;
                     AppControl.Invalidate(true);
                     AppControl.Refresh();
-                    AppControl.RetrieveData();
+                    AppControl.InvalidateAndRefresh();
                 }
                 catch
                 {
@@ -91,9 +93,7 @@ namespace Outlook2021TodoAddIn
             try
             {
                 this.AppControl = new AppointmentsControl();
-
-                this.AppControl.Accounts  = Properties.Settings.Default.Accounts;
-                this.AppControl.ShowTasks = Properties.Settings.Default.ShowTasks;
+                this.AppControl.Accounts = Properties.Settings.Default.Accounts;
 
                 ToDoTaskPane = this.CustomTaskPanes.Add(this.AppControl, " ");
                 ToDoTaskPane.Visible              = Properties.Settings.Default.Visible;
@@ -101,22 +101,30 @@ namespace Outlook2021TodoAddIn
                 ToDoTaskPane.DockPosition         = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
                 ToDoTaskPane.DockPositionRestrict = Office.MsoCTPDockPositionRestrict.msoCTPDockPositionRestrictNoHorizontal;
                 ToDoTaskPane.VisibleChanged       += ToDoTaskPane_VisibleChanged;
-                this.AppControl.SizeChanged       += appControl_SizeChanged;
+
+                // Breite nur alle 500 ms speichern (nicht auf jeden Resize-Pixel)
+                _widthTimer = new System.Windows.Forms.Timer { Interval = 500 };
+                _widthTimer.Tick += (s, e) =>
+                {
+                    _widthTimer.Stop();
+                    Properties.Settings.Default.Width = ToDoTaskPane.Width;
+                };
+                this.AppControl.SizeChanged += appControl_SizeChanged;
 
                 _taskPaneCreated = true;
 
-                // Kalender-Änderungen überwachen
+                // Kalender-Änderungen des Default-Stores überwachen
                 var calFolder = this.Application.Session.GetDefaultFolder(
                     Microsoft.Office.Interop.Outlook.OlDefaultFolders.olFolderCalendar)
                     as Microsoft.Office.Interop.Outlook.Folder;
                 if (calFolder != null)
                 {
                     ((Microsoft.Office.Interop.Outlook.ItemsEvents_Event)calFolder.Items).ItemAdd
-                        += (item) => { if (AppControl != null) AppControl.RetrieveData(); };
+                        += (item) => { if (AppControl != null) AppControl.InvalidateAndRefresh(); };
                     ((Microsoft.Office.Interop.Outlook.ItemsEvents_Event)calFolder.Items).ItemChange
-                        += (item) => { if (AppControl != null) AppControl.RetrieveData(); };
+                        += (item) => { if (AppControl != null) AppControl.InvalidateAndRefresh(); };
                     ((Microsoft.Office.Interop.Outlook.ItemsEvents_Event)calFolder.Items).ItemRemove
-                        += () => { if (AppControl != null) AppControl.RetrieveData(); };
+                        += () => { if (AppControl != null) AppControl.InvalidateAndRefresh(); };
                 }
 
                 this.AppControl.SelectedDate = DateTime.Today;
@@ -126,18 +134,17 @@ namespace Outlook2021TodoAddIn
 
                 var explorer = this.Application.ActiveExplorer();
                 explorer.Deactivate += ThisAddIn_Deactivate;
-
                 ((Microsoft.Office.Interop.Outlook.ExplorerEvents_10_Event)explorer).Activate
                     += Explorer_Activate;
 
-                _refreshTimer = new System.Windows.Forms.Timer();
-                _refreshTimer.Interval = 30 * 60 * 1000;
-                _refreshTimer.Tick += (s, e) => { if (AppControl != null) AppControl.RetrieveData(); };
+                // Auto-Refresh alle 30 Minuten
+                _refreshTimer = new System.Windows.Forms.Timer { Interval = 30 * 60 * 1000 };
+                _refreshTimer.Tick += (s, e) => { if (AppControl != null) AppControl.InvalidateAndRefresh(); };
                 _refreshTimer.Start();
             }
             catch (Exception exc)
             {
-                MessageBox.Show(String.Format("Error creating TaskPane: {0}", exc.ToString()));
+                MessageBox.Show(string.Format("Error creating TaskPane: {0}", exc.ToString()));
             }
         }
 
@@ -155,8 +162,8 @@ namespace Outlook2021TodoAddIn
 
         private void Application_Quit()
         {
-            // Ab hier: Visible-State einfrieren. VSTO versteckt den Pane
-            // gleich danach (löst VisibleChanged aus) — das darf den echten Wert nicht überschreiben.
+            // Visible-State einfrieren — VSTO-Cleanup löst danach VisibleChanged aus,
+            // das darf den gespeicherten Wert nicht überschreiben.
             _isShuttingDown = true;
             if (_taskPaneCreated && ToDoTaskPane != null)
                 Properties.Settings.Default.Visible = ToDoTaskPane.Visible;
@@ -165,8 +172,8 @@ namespace Outlook2021TodoAddIn
 
         private void appControl_SizeChanged(object sender, EventArgs e)
         {
-            if (ToDoTaskPane != null)
-                Properties.Settings.Default.Width = ToDoTaskPane.Width;
+            _widthTimer.Stop();
+            _widthTimer.Start();
         }
 
         private void ToDoTaskPane_VisibleChanged(object sender, EventArgs e)
@@ -191,8 +198,9 @@ namespace Outlook2021TodoAddIn
         {
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             if (_refreshTimer != null) { _refreshTimer.Stop(); _refreshTimer.Dispose(); }
-            // Application_Quit hat bereits den korrekten Wert gespeichert —
-            // kein Save() mehr, sonst überschreibt VSTO-Shutdown-State den echten Wert.
+            if (_widthTimer   != null) { _widthTimer.Stop();   _widthTimer.Dispose(); }
+            // Application_Quit hat bereits den korrekten Visible-Wert gespeichert —
+            // kein Save() mehr wenn über Quit gefahren, sonst überschreibt VSTO-State den echten Wert.
             if (!_isShuttingDown)
                 Properties.Settings.Default.Save();
         }
