@@ -2,9 +2,11 @@
  * @file    AppointmentsControl.cs
  * @brief   UserControl: Monatskalender + Terminliste.
  * @author  Gerhard Lustig <gerhard@lustig.at>
- * @version 2.2.0
- * @date    2026-05-19
+ * @version 2.3.0
+ * @date    2026-06-18
  * @history
+ *   2.3.0  2026-06-18  Terminliste-Hintergrund über _listBg steuerbar (aktuell Darken 1.0 =
+ *                      SystemColors.Window). Kategorie-Balken unverändert.
  *   2.2.0  2026-05-19  Kalender-Controls einmal erstellen (InitCalendarControls), danach
  *                      nur noch Properties updaten — kein GDI-Handle-Create/Destroy mehr
  *                      pro Rebuild (~55 Controls). BuildCalendar() ist jetzt reine
@@ -82,6 +84,9 @@ namespace Outlook2021TodoAddIn
         private Font _fontItalic;  // 8.0pt Italic  — Terminort
         private Font _fontEmoji;   // Segoe UI Emoji 8.5pt Bold — Terminbetreff (Emoji-fähig)
 
+        // Hintergrund der Terminliste — etwas dunkler als SystemColors.Window
+        private static readonly Color _listBg = Darken(SystemColors.Window, 1.0f);
+
         // ══════════════════════════════════════════════════════════════════
         // Properties
         // ══════════════════════════════════════════════════════════════════
@@ -107,6 +112,7 @@ namespace Outlook2021TodoAddIn
             InitCalendarControls();
 
             _flpAppointments = BuildFlowPanel();
+            pnlAppointments.BackColor = _listBg;              // Container-Hintergrund (Leerraum unter Terminen)
             pnlAppointments.Controls.Add(_flpAppointments);
 
             _toolTip = new ToolTip { AutoPopDelay = 8000 };
@@ -177,7 +183,7 @@ namespace Outlook2021TodoAddIn
                 AutoSizeMode  = AutoSizeMode.GrowAndShrink,
                 Padding       = new Padding(0),
                 Margin        = new Padding(0),
-                BackColor     = SystemColors.Window
+                BackColor     = _listBg
             };
         }
 
@@ -501,7 +507,7 @@ namespace Outlook2021TodoAddIn
                 _flpAppointments.Controls.Add(BuildAppointmentEntry(appt, w, rowH));
                 usedH += (hasLoc ? 2 : 1) * rowH;
 
-                _flpAppointments.Controls.Add(new Panel { Height = spacerH, Width = w, BackColor = SystemColors.Window });
+                _flpAppointments.Controls.Add(new Panel { Height = spacerH, Width = w, BackColor = _listBg });
                 usedH += spacerH;
             }
 
@@ -525,7 +531,7 @@ namespace Outlook2021TodoAddIn
             {
                 Width     = width,
                 Height    = height,
-                BackColor = SystemColors.Window,
+                BackColor = _listBg,
                 Margin    = new Padding(0),
                 Padding   = new Padding(0)
             };
@@ -627,7 +633,7 @@ namespace Outlook2021TodoAddIn
                 Padding         = new Padding(0),
                 Margin          = new Padding(0),
                 CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
-                BackColor       = SystemColors.Window
+                BackColor       = _listBg
             };
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, COL_TIME));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, COL_BAR));
@@ -639,11 +645,11 @@ namespace Outlook2021TodoAddIn
 
         private static void TintChildren(TableLayoutPanel tbl)
         {
-            tbl.BackColor = SystemColors.Window;
+            tbl.BackColor = _listBg;
             foreach (Control c in tbl.Controls)
             {
                 if (c is Panel) continue;                               // Farbbalken — nicht anfassen
-                c.BackColor = tbl.GetColumn(c) == 0 ? SystemColors.Window : Color.Transparent;
+                c.BackColor = tbl.GetColumn(c) == 0 ? _listBg : Color.Transparent;
             }
         }
 
@@ -759,6 +765,16 @@ namespace Outlook2021TodoAddIn
         // ══════════════════════════════════════════════════════════════════
         // Kategorie-Farben
         // ══════════════════════════════════════════════════════════════════
+
+        // Kategoriefarbe abdunkeln (factor < 1 = dunkler)
+        private static Color Darken(Color c, float factor)
+        {
+            return Color.FromArgb(
+                c.A,
+                (int)(c.R * factor),
+                (int)(c.G * factor),
+                (int)(c.B * factor));
+        }
 
         private Color TranslateCategoryColor(Outlook.OlCategoryColor col)
         {
