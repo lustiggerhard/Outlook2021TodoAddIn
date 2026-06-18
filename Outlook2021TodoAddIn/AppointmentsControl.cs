@@ -2,9 +2,12 @@
  * @file    AppointmentsControl.cs
  * @brief   UserControl: Monatskalender + Terminliste.
  * @author  Gerhard Lustig <gerhard@lustig.at>
- * @version 2.3.0
+ * @version 2.4.0
  * @date    2026-06-18
  * @history
+ *   2.4.0  2026-06-18  Termin-Zeilen-Hintergrund = aufgehellte Kategoriefarbe
+ *                      (Lighten-Helper, amount 0.72). Termine ohne Kategorie bleiben
+ *                      neutral weiß. Balken behält volle Farbe.
  *   2.3.0  2026-06-18  Terminliste-Hintergrund über _listBg steuerbar (aktuell Darken 1.0 =
  *                      SystemColors.Window). Kategorie-Balken unverändert.
  *   2.2.0  2026-05-19  Kalender-Controls einmal erstellen (InitCalendarControls), danach
@@ -572,8 +575,11 @@ namespace Outlook2021TodoAddIn
         private TableLayoutPanel BuildAppointmentEntry(Outlook.AppointmentItem appt, int width, int rowH)
         {
             bool  hasLoc   = !string.IsNullOrEmpty(appt.Location);
+            bool  hasCat   = !string.IsNullOrEmpty(appt.Categories);
             Color barColor = GetApptBarColor(appt);
-            var   tbl      = BuildEntryTable(width, rowH, hasLoc ? 2 : 1);
+            // mit Kategorie: aufgehellte Kategoriefarbe als Zeilen-Hintergrund; ohne: neutral weiß
+            Color rowBg    = hasCat ? Lighten(barColor, 0.72f) : SystemColors.Window;
+            var   tbl      = BuildEntryTable(width, rowH, hasLoc ? 2 : 1, rowBg);
 
             tbl.Controls.Add(new Label
             {
@@ -617,12 +623,12 @@ namespace Outlook2021TodoAddIn
                 }, 2, 1);
             }
 
-            TintChildren(tbl);
+            TintChildren(tbl, rowBg);
             AttachEvents(tbl, appt, BuildApptTooltip(appt));
             return tbl;
         }
 
-        private TableLayoutPanel BuildEntryTable(int width, int rowH, int rows)
+        private TableLayoutPanel BuildEntryTable(int width, int rowH, int rows, Color bg)
         {
             var tbl = new TableLayoutPanel
             {
@@ -633,7 +639,7 @@ namespace Outlook2021TodoAddIn
                 Padding         = new Padding(0),
                 Margin          = new Padding(0),
                 CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
-                BackColor       = _listBg
+                BackColor       = bg
             };
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, COL_TIME));
             tbl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, COL_BAR));
@@ -643,13 +649,14 @@ namespace Outlook2021TodoAddIn
             return tbl;
         }
 
-        private static void TintChildren(TableLayoutPanel tbl)
+        private static void TintChildren(TableLayoutPanel tbl, Color bg)
         {
-            tbl.BackColor = _listBg;
+            tbl.BackColor = bg;
             foreach (Control c in tbl.Controls)
             {
                 if (c is Panel) continue;                               // Farbbalken — nicht anfassen
-                c.BackColor = tbl.GetColumn(c) == 0 ? _listBg : Color.Transparent;
+                // Spalte 0 (Uhrzeit) immer neutral weiß, restliche Zellen transparent (Tabellen-bg)
+                c.BackColor = tbl.GetColumn(c) == 0 ? SystemColors.Window : Color.Transparent;
             }
         }
 
@@ -774,6 +781,16 @@ namespace Outlook2021TodoAddIn
                 (int)(c.R * factor),
                 (int)(c.G * factor),
                 (int)(c.B * factor));
+        }
+
+        // Kategoriefarbe aufhellen — Richtung Weiß mischen (amount 0 = Original, 1 = weiß)
+        private static Color Lighten(Color c, float amount)
+        {
+            return Color.FromArgb(
+                c.A,
+                (int)(c.R + (255 - c.R) * amount),
+                (int)(c.G + (255 - c.G) * amount),
+                (int)(c.B + (255 - c.B) * amount));
         }
 
         private Color TranslateCategoryColor(Outlook.OlCategoryColor col)
