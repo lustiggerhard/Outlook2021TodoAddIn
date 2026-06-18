@@ -2,9 +2,11 @@
  * @file    AppointmentsControl.cs
  * @brief   UserControl: Monatskalender + Terminliste.
  * @author  Gerhard Lustig <gerhard@lustig.at>
- * @version 2.4.0
+ * @version 2.4.1
  * @date    2026-06-18
  * @history
+ *   2.4.1  2026-06-18  Fix: leerer Platzhalter in Uhrzeit-Spalte (Location-Zeile) bekommt
+ *                      Dock=Fill, sonst scheint rowBg im unteren Strich durch (nicht weiß).
  *   2.4.0  2026-06-18  Termin-Zeilen-Hintergrund = aufgehellte Kategoriefarbe
  *                      (Lighten-Helper, amount 0.72). Termine ohne Kategorie bleiben
  *                      neutral weiß. Balken behält volle Farbe.
@@ -609,7 +611,8 @@ namespace Outlook2021TodoAddIn
 
             if (hasLoc)
             {
-                tbl.Controls.Add(new Label { Margin = new Padding(0) }, 0, 1);
+                // Platzhalter muss die Zelle voll abdecken, sonst scheint rowBg im unteren Strich der Uhrzeit-Spalte durch
+                tbl.Controls.Add(new Label { Dock = DockStyle.Fill, Margin = new Padding(0) }, 0, 1);
                 tbl.Controls.Add(new Label
                 {
                     Text      = appt.Location,
