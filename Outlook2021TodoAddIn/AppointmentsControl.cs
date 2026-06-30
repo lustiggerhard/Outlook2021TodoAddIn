@@ -2,9 +2,54 @@
  * @file    AppointmentsControl.cs
  * @brief   UserControl: Monatskalender + Terminliste.
  * @author  Gerhard Lustig <gerhard@lustig.at>
- * @version 2.4.1
- * @date    2026-06-18
+ * @version 2.7.9
+ * @date    2026-06-30
  * @history
+ *   2.7.9  2026-06-30  Terminliste: Uhrzeit (_fontSmall 7.5→7.0) und Datum + Wochentag
+ *                      (_fontListHdr 8.0→7.5) je 0.5pt zurückgenommen.
+ *   2.7.8  2026-06-30  Terminliste: Uhrzeit (_fontSmall 6.5→7.5) sowie Datum + Wochentag
+ *                      (_fontListHdr 7.0→8.0) je 1pt größer.
+ *   2.7.7  2026-06-21  Schriftfarbe nach echtem WCAG-2.x-Kontrast: sRGB→linear, relative
+ *                      Luminanz, Kontrastverhältnis Weiß vs. Schwarz — die Farbe mit dem
+ *                      höheren Verhältnis gewinnt (Crossover L ≈ 0.179). Ersetzt die feste
+ *                      Rec.601-Luminanzschwelle.
+ *   2.7.6  2026-06-21  Kontrastschwelle 0.55 → 0.72: rötliche/blaue Kacheln bekommen weiße
+ *                      Schrift (kein Schwarz auf Rot), nur sehr helle (Orange/Gelb) bleiben
+ *                      schwarz. Gilt für Titel und Ort.
+ *   2.7.5  2026-06-21  Hintergrund auf 50% (Lighten 0.90 → 0.50). Termin-Schrift je 1pt
+ *                      kleiner: Titel 8.5→7.5, Ort/Uhrzeit 7.5→6.5.
+ *   2.7.4  2026-06-21  Termin-Hintergrund auf 90% aufgehellt (Lighten 0.15 → 0.90);
+ *                      Balken behält Vollfarbe.
+ *   2.7.3  2026-06-21  Peach-Kategorie (MotoGP-Orange) auf vollen Orange-Ton #F5A030
+ *                      gesetzt — war PeachPuff (blass). Abstand zwischen Terminen 4→6px.
+ *   2.7.2  2026-06-21  Header außerhalb dieser Woche Reihenfolge "Datum Wochentag"
+ *                      (25.06.2026 Donnerstag). Farbbalken wieder Vollfarbe (Darken
+ *                      zurückgenommen). Abstand zwischen Terminen 2→4px.
+ *   2.7.1  2026-06-21  Header außerhalb dieser Woche jetzt Wochentag + Datum ("Donnerstag
+ *                      25.06.2026"); Header-Font 8.0→7.0. Farbbalken abgedunkelt (Darken 0.70).
+ *                      Tagesabstand 13→7px. Fix Render-Overflow: Spacer-/Gap-Panels bekommen
+ *                      Margin 0 — Default-Margin (3px) verfälschte das Höhenbudget, dadurch
+ *                      wurden mehr Termine eingehängt als real ins Panel passen.
+ *   2.7.0  2026-06-21  Outlook-Angleich: Datums-Header einzeilig (Heute/Gestern/Morgen,
+ *                      sonst Wochentag in dieser Woche, außerhalb dd.MM.yyyy) — _fontListDay
+ *                      entfernt. Grundfarben satter (Orange #F5A030, Maroon #8B3050,
+ *                      Blue #2060C0), Hintergrund nur noch Lighten 0.15. Fonts: Titel 8.0→8.5,
+ *                      Ort 7.0→7.5. Zeilenhöhe enger (Titel-Font + 1). Tagesgruppen-Abstand
+ *                      13px vor jedem neuen Tages-Header.
+ *   2.6.1  2026-06-21  Kontrast/Dichte: Zeilen-Hintergrund noch kräftiger (Lighten 0.50 → 0.45),
+ *                      Zeilenhöhe kompakter (Titel-Font + 2 statt _fontBold + 6). Schriftfarbe
+ *                      luminanzabhängig (ContrastText/-Muted): helle Kachel → schwarze Schrift,
+ *                      dunkle (z.B. DarkRed) → weiße Schrift. Uhrzeit-Spalte bleibt weiß/schwarz.
+ *   2.6.0  2026-06-21  Terminliste optisch an nativen Outlook-Kalender angeglichen:
+ *                      Zeilen-Hintergrund kräftiger (Lighten 0.72 → 0.50). Fonts der
+ *                      Terminliste kompakter — Uhrzeit 8.0→7.5, Ort 8.0→7.0, Titel 8.5→8.0;
+ *                      Datums-Header über eigene _fontListHdr/_fontListDay (8.0 bold / 7.5)
+ *                      damit der Monatskalender oben unverändert bleibt.
+ *   2.5.1  2026-06-21  Fix Flackern beim Refresh: WS_EX_COMPOSITED auf eigener
+ *                      CompositedFlowPanel-Subklasse (inneres Listen-Panel) statt auf dem
+ *                      UserControl — Off-Screen-Puffer für alle Termin-Kindcontrols.
+ *                      WS_EX_COMPOSITED auf dem COM-gehosteten UserControl brach das
+ *                      VSTO-TaskPane-Hosting (CreateTaskPane → E_FAIL).
  *   2.4.1  2026-06-18  Fix: leerer Platzhalter in Uhrzeit-Spalte (Location-Zeile) bekommt
  *                      Dock=Fill, sonst scheint rowBg im unteren Strich durch (nicht weiß).
  *   2.4.0  2026-06-18  Termin-Zeilen-Hintergrund = aufgehellte Kategoriefarbe
@@ -85,12 +130,13 @@ namespace Outlook2021TodoAddIn
         private Font _fontHdr;     // 8.0pt Bold    — Wochentag-Spaltenköpfe im Kalender
         private Font _fontDay;     // 8.5pt Regular — normale Kalendertage + Wochentag-Label
         private Font _fontKW;      // 7.5pt Regular — Kalenderwochen-Zahlen
-        private Font _fontSmall;   // 8.0pt Regular — Terminuhrzeit
-        private Font _fontItalic;  // 8.0pt Italic  — Terminort
-        private Font _fontEmoji;   // Segoe UI Emoji 8.5pt Bold — Terminbetreff (Emoji-fähig)
+        private Font _fontSmall;   // 7.0pt Regular — Terminuhrzeit
+        private Font _fontItalic;  // 6.5pt Italic  — Terminort
+        private Font _fontEmoji;   // Segoe UI Emoji 7.5pt Bold — Terminbetreff (Emoji-fähig)
+        private Font _fontListHdr; // 7.5pt Bold    — Datums-Header der Terminliste ("Heute"/Wochentag/Datum)
 
-        // Hintergrund der Terminliste — etwas dunkler als SystemColors.Window
-        private static readonly Color _listBg = Darken(SystemColors.Window, 1.0f);
+        // Hintergrund der Terminliste — zentraler Knopf für die Listenfarbe
+        private static readonly Color _listBg = SystemColors.Window;
 
         // ══════════════════════════════════════════════════════════════════
         // Properties
@@ -162,9 +208,10 @@ namespace Outlook2021TodoAddIn
             _fontHdr    = new Font(ff, 8.0f, FontStyle.Bold);
             _fontDay    = new Font(ff, 8.5f, FontStyle.Regular);
             _fontKW     = new Font(ff, 7.5f, FontStyle.Regular);
-            _fontSmall  = new Font(ff, 8.0f, FontStyle.Regular);
-            _fontItalic = new Font(ff, 8.0f, FontStyle.Italic);
-            _fontEmoji  = new Font("Segoe UI Emoji", 8.5f, FontStyle.Bold);
+            _fontSmall  = new Font(ff, 7.0f, FontStyle.Regular);
+            _fontItalic = new Font(ff, 6.5f, FontStyle.Italic);
+            _fontEmoji  = new Font("Segoe UI Emoji", 7.5f, FontStyle.Bold);
+            _fontListHdr = new Font(ff, 7.5f, FontStyle.Bold);
         }
 
         internal void DisposeCachedFonts()
@@ -176,11 +223,30 @@ namespace Outlook2021TodoAddIn
             _fontSmall?.Dispose();  _fontSmall  = null;
             _fontItalic?.Dispose(); _fontItalic = null;
             _fontEmoji?.Dispose();  _fontEmoji  = null;
+            _fontListHdr?.Dispose(); _fontListHdr = null;
+        }
+
+        // FlowLayoutPanel mit WS_EX_COMPOSITED (0x02000000): das Panel inkl. aller Termin-
+        // Kindcontrols wird off-screen gepuffert und in einem Rutsch geblittet — verhindert
+        // das Flackern beim kompletten Neuaufbau der Liste (Clear/Dispose/Re-Add).
+        // Bewusst auf diesem inneren Panel statt auf dem UserControl: WS_EX_COMPOSITED auf
+        // dem COM-gehosteten UserControl bricht das VSTO-TaskPane-Hosting (CreateTaskPane → E_FAIL).
+        private sealed class CompositedFlowPanel : FlowLayoutPanel
+        {
+            protected override CreateParams CreateParams
+            {
+                get
+                {
+                    var cp = base.CreateParams;
+                    cp.ExStyle |= 0x02000000;
+                    return cp;
+                }
+            }
         }
 
         private static FlowLayoutPanel BuildFlowPanel()
         {
-            return new FlowLayoutPanel
+            return new CompositedFlowPanel
             {
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents  = false,
@@ -486,10 +552,11 @@ namespace Outlook2021TodoAddIn
             if (panelH <= 0) panelH = 400;
             int w = Math.Max(pnlAppointments.ClientSize.Width - 2, 100);
 
-            int rowH    = _fontBold.Height + 6;
-            int hdrH    = rowH + 2;
-            int spacerH = 2;
-            int usedH   = 0;
+            int rowH     = _fontEmoji.Height + 1;
+            int hdrH     = rowH + 2;
+            int spacerH  = 6;         // vertikaler Abstand zwischen Terminen innerhalb eines Tages
+            int groupGap = 7;         // vertikale Lücke vor jedem neuen Tages-Header (außer dem ersten)
+            int usedH    = 0;
             int lastDay = -1, lastYear = -1;
 
             foreach (var appt in appts)
@@ -498,21 +565,26 @@ namespace Outlook2021TodoAddIn
                 bool     hasLoc   = !string.IsNullOrEmpty(appt.Location);
 
                 bool newDay = itemDate.Day != lastDay || itemDate.Year != lastYear;
-                int needed  = (newDay ? hdrH : 0) + (hasLoc ? 2 : 1) * rowH + spacerH;
+                int gap     = (newDay && usedH > 0) ? groupGap : 0;
+                int needed  = gap + (newDay ? hdrH : 0) + (hasLoc ? 2 : 1) * rowH + spacerH;
                 if (usedH + needed > panelH) break;
 
                 if (newDay)
                 {
+                    if (gap > 0)
+                    {
+                        _flpAppointments.Controls.Add(new Panel { Height = gap, Width = w, BackColor = _listBg, Margin = new Padding(0) });
+                        usedH += gap;
+                    }
                     lastDay = itemDate.Day; lastYear = itemDate.Year;
-                    var (dateText, weekdayText) = FormatDateHeader(itemDate);
-                    _flpAppointments.Controls.Add(BuildGroupHeader(dateText, weekdayText, w, hdrH));
+                    _flpAppointments.Controls.Add(BuildGroupHeader(FormatDateHeader(itemDate), w, hdrH));
                     usedH += hdrH;
                 }
 
                 _flpAppointments.Controls.Add(BuildAppointmentEntry(appt, w, rowH));
                 usedH += (hasLoc ? 2 : 1) * rowH;
 
-                _flpAppointments.Controls.Add(new Panel { Height = spacerH, Width = w, BackColor = _listBg });
+                _flpAppointments.Controls.Add(new Panel { Height = spacerH, Width = w, BackColor = _listBg, Margin = new Padding(0) });
                 usedH += spacerH;
             }
 
@@ -521,16 +593,24 @@ namespace Outlook2021TodoAddIn
 
         // ── Datum/Gruppen-Header ──────────────────────────────────────────
 
-        private (string dateText, string weekdayText) FormatDateHeader(DateTime date)
+        // Heute/Gestern/Morgen benannt; sonst innerhalb dieser Woche der Wochentag,
+        // außerhalb der Woche das Datum ohne Wochentag (wie nativer Outlook-Kalender).
+        private string FormatDateHeader(DateTime date)
         {
-            int diff = (int)(date - DateTime.Today).TotalDays;
-            string prefix = diff == -1 ? Constants.Yesterday + ":  " :
-                            diff ==  0 ? Constants.Today     + ":  " :
-                            diff ==  1 ? Constants.Tomorrow  + ":  " : "";
-            return (prefix + date.ToShortDateString(), date.ToString("dddd"));
+            int diff = (int)(date.Date - DateTime.Today).TotalDays;
+            if (diff == -1) return Constants.Yesterday;
+            if (diff ==  0) return Constants.Today;
+            if (diff ==  1) return Constants.Tomorrow;
+
+            int dow = (int)DateTime.Today.DayOfWeek;
+            DateTime weekStart = DateTime.Today.AddDays(dow == 0 ? -6 : -(dow - 1));
+            DateTime weekEnd   = weekStart.AddDays(6);
+            return (date.Date >= weekStart && date.Date <= weekEnd)
+                   ? date.ToString("dddd")
+                   : date.ToString("dd.MM.yyyy dddd");
         }
 
-        private Control BuildGroupHeader(string dateText, string weekdayText, int width, int height)
+        private Control BuildGroupHeader(string text, int width, int height)
         {
             var pnl = new Panel
             {
@@ -541,33 +621,17 @@ namespace Outlook2021TodoAddIn
                 Padding   = new Padding(0)
             };
 
-            var lblDate = new Label
+            pnl.Controls.Add(new Label
             {
-                Text      = dateText,
-                Font      = _fontBold,
+                Text      = text,
+                Font      = _fontListHdr,
                 ForeColor = Color.FromArgb(40, 60, 100),
                 BackColor = Color.Transparent,
                 AutoSize  = true,
                 Height    = height,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Location  = new Point(4, 0)
-            };
-            var lblDay = new Label
-            {
-                Text      = weekdayText,
-                Font      = _fontDay,
-                ForeColor = Color.FromArgb(40, 60, 100),
-                BackColor = Color.Transparent,
-                AutoSize  = true,
-                Height    = height,
-                TextAlign = ContentAlignment.MiddleLeft
-            };
-
-            pnl.Controls.Add(lblDate);
-            pnl.Controls.Add(lblDay);
-
-            lblDate.Width   = TextRenderer.MeasureText(dateText, _fontBold).Width;
-            lblDay.Location = new Point(lblDate.Left + lblDate.Width + 4, 0);
+            });
 
             return pnl;
         }
@@ -580,7 +644,7 @@ namespace Outlook2021TodoAddIn
             bool  hasCat   = !string.IsNullOrEmpty(appt.Categories);
             Color barColor = GetApptBarColor(appt);
             // mit Kategorie: aufgehellte Kategoriefarbe als Zeilen-Hintergrund; ohne: neutral weiß
-            Color rowBg    = hasCat ? Lighten(barColor, 0.72f) : SystemColors.Window;
+            Color rowBg    = hasCat ? Lighten(barColor, 0.80f) : SystemColors.Window;
             var   tbl      = BuildEntryTable(width, rowH, hasLoc ? 2 : 1, rowBg);
 
             tbl.Controls.Add(new Label
@@ -602,6 +666,7 @@ namespace Outlook2021TodoAddIn
             {
                 Text      = appt.Subject ?? "",
                 Font      = _fontEmoji,
+                ForeColor = ContrastText(rowBg),
                 TextAlign = ContentAlignment.MiddleLeft,
                 Dock      = DockStyle.Fill,
                 AutoEllipsis = true,
@@ -620,7 +685,7 @@ namespace Outlook2021TodoAddIn
                     TextAlign = ContentAlignment.MiddleLeft,
                     Dock      = DockStyle.Fill,
                     AutoEllipsis = true,
-                    ForeColor = SystemColors.GrayText,
+                    ForeColor = ContrastTextMuted(rowBg),
                     Padding   = new Padding(4, 0, 2, 0),
                     Margin    = new Padding(0)
                 }, 2, 1);
@@ -786,6 +851,34 @@ namespace Outlook2021TodoAddIn
                 (int)(c.B * factor));
         }
 
+        // sRGB-Kanal (0..1) in lineares Licht (WCAG 2.x)
+        private static double SrgbToLinear(double c)
+            => c <= 0.03928 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4);
+
+        // Relative Luminanz nach WCAG 2.x
+        private static double RelLuminance(Color c)
+            => 0.2126 * SrgbToLinear(c.R / 255.0)
+             + 0.7152 * SrgbToLinear(c.G / 255.0)
+             + 0.0722 * SrgbToLinear(c.B / 255.0);
+
+        // WCAG-Kontrastverhältnis gegen Weiß vs. Schwarz vergleichen — Weiß nur wenn es
+        // den höheren Kontrast liefert (Crossover bei L ≈ 0.179).
+        private static bool PreferWhiteText(Color bg)
+        {
+            double l = RelLuminance(bg);
+            double contrastWhite = (1.0 + 0.05) / (l + 0.05);   // Weiß  über bg
+            double contrastBlack = (l + 0.05) / (0.0 + 0.05);   // Schwarz über bg
+            return contrastWhite >= contrastBlack;
+        }
+
+        // Schriftfarbe mit dem höheren WCAG-Kontrast zum Hintergrund.
+        private static Color ContrastText(Color bg)
+            => PreferWhiteText(bg) ? Color.White : Color.Black;
+
+        // Gedämpfte Variante (Ort): auf weißem Text hellgrau, auf schwarzem Text Systemgrau.
+        private static Color ContrastTextMuted(Color bg)
+            => PreferWhiteText(bg) ? Color.FromArgb(235, 235, 235) : SystemColors.GrayText;
+
         // Kategoriefarbe aufhellen — Richtung Weiß mischen (amount 0 = Original, 1 = weiß)
         private static Color Lighten(Color c, float amount)
         {
@@ -801,15 +894,15 @@ namespace Outlook2021TodoAddIn
             switch (col)
             {
                 case Outlook.OlCategoryColor.olCategoryColorRed:        return Color.Red;
-                case Outlook.OlCategoryColor.olCategoryColorOrange:     return Color.Orange;
-                case Outlook.OlCategoryColor.olCategoryColorPeach:      return Color.PeachPuff;
+                case Outlook.OlCategoryColor.olCategoryColorOrange:     return Color.FromArgb(0xF5, 0xA0, 0x30);
+                case Outlook.OlCategoryColor.olCategoryColorPeach:      return Color.FromArgb(0xF5, 0xA0, 0x30);
                 case Outlook.OlCategoryColor.olCategoryColorYellow:     return Color.Gold;
                 case Outlook.OlCategoryColor.olCategoryColorGreen:      return Color.Green;
                 case Outlook.OlCategoryColor.olCategoryColorTeal:       return Color.Teal;
                 case Outlook.OlCategoryColor.olCategoryColorOlive:      return Color.Olive;
-                case Outlook.OlCategoryColor.olCategoryColorBlue:       return Color.Blue;
+                case Outlook.OlCategoryColor.olCategoryColorBlue:       return Color.FromArgb(0x20, 0x60, 0xC0);
                 case Outlook.OlCategoryColor.olCategoryColorPurple:     return Color.Purple;
-                case Outlook.OlCategoryColor.olCategoryColorMaroon:     return Color.Maroon;
+                case Outlook.OlCategoryColor.olCategoryColorMaroon:     return Color.FromArgb(0x8B, 0x30, 0x50);
                 case Outlook.OlCategoryColor.olCategoryColorSteel:      return Color.LightSteelBlue;
                 case Outlook.OlCategoryColor.olCategoryColorDarkSteel:  return Color.SteelBlue;
                 case Outlook.OlCategoryColor.olCategoryColorGray:       return Color.Gray;
