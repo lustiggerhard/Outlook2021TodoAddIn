@@ -2,9 +2,12 @@
  * @file    AppointmentsControl.cs
  * @brief   UserControl: Monatskalender + Terminliste.
  * @author  Gerhard Lustig <gerhard@lustig.at>
- * @version 2.8.0
+ * @version 2.8.1
  * @date    2026-09-25
  * @history
+ *   2.8.1  2026-09-25  Versions-Label ganz an die Unterkante des Terminbereichs (lag 49px
+ *                      zu hoch). Liegt jetzt im freigehaltenen STATUSBAR_H-Streifen,
+ *                      Terminliste reserviert daher keine Extra-Höhe mehr.
  *   2.8.0  2026-09-25  ClickOnce-Version (z.B. "v1.0.0.29") klein/grau rechts unten im
  *                      Terminbereich. Gelesen aus Outlook2021TodoAddIn.dll.manifest neben
  *                      der installierten DLL (Assembly.CodeBase, nicht Location — VSTO
@@ -136,7 +139,7 @@ namespace Outlook2021TodoAddIn
         private const int COL_TIME = 65;
         private const int COL_BAR  = 10;
 
-        // Von Outlook-Statusbalken verdeckter Bereich am unteren Rand des Terminbereichs (px)
+        // Freigehaltener Streifen am unteren Rand des Terminbereichs (px); enthält das Versions-Label
         private const int STATUSBAR_H = 49;
 
         // Font-Cache — einmal erstellt, wiederverwendet; Dispose via DisposeCachedFonts()
@@ -180,7 +183,7 @@ namespace Outlook2021TodoAddIn
             pnlAppointments.BackColor = _listBg;              // Container-Hintergrund (Leerraum unter Terminen)
             pnlAppointments.Controls.Add(_flpAppointments);
 
-            // Versions-Label: sitzt direkt über dem vom Statusbalken verdeckten Streifen
+            // Versions-Label: rechts unten, direkt an der Unterkante des Terminbereichs
             _lblVersion = new Label
             {
                 Text      = "v" + GetPublishVersion(),
@@ -297,7 +300,7 @@ namespace Outlook2021TodoAddIn
 
         private void PositionVersionLabel()
         {
-            int y = pnlAppointments.ClientSize.Height - STATUSBAR_H - _lblVersion.Height;
+            int y = pnlAppointments.ClientSize.Height - _lblVersion.Height;
             int x = pnlAppointments.ClientSize.Width  - _lblVersion.Width - 4;
             _lblVersion.Location = new Point(Math.Max(x, 0), Math.Max(y, 0));
         }
@@ -606,8 +609,8 @@ namespace Outlook2021TodoAddIn
 
             if (appts.Count == 0) { _flpAppointments.ResumeLayout(); return; }
 
-            // Statusbalken-Streifen + Versions-Label freihalten
-            int panelH = pnlAppointments.ClientSize.Height - STATUSBAR_H - _lblVersion.Height;
+            // Unteren Streifen freihalten — dort sitzt das Versions-Label
+            int panelH = pnlAppointments.ClientSize.Height - STATUSBAR_H;
             if (panelH <= 0) panelH = 400;
             int w = Math.Max(pnlAppointments.ClientSize.Width - 2, 100);
 

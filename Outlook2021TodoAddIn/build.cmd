@@ -2,9 +2,10 @@
 :: @file       build.cmd
 :: @brief      Build + ClickOnce-Publish (Release) fuer Outlook2021TodoAddIn
 :: @author     Gerhard Lustig <gerhard@lustig.at>
-:: @version    1.2.0
+:: @version    1.3.0
 :: @date       2026-09-25
 :: @history
+::   1.3.0 (2026-09-25) - Alte Versionsordner in "Application Files" loeschen (nur aktuelle bleibt)
 ::   1.2.0 (2026-09-25) - app.publish nach PublishUrl kopieren (MSBuild-CLI kopiert nicht, nur die VS-IDE)
 ::   1.1.1 (2026-09-25) - Fix: vswhere-Pfad im echo quoten, "(x86)" beendete den if-Block
 ::   1.1.0 (2026-09-25) - pre-build.bat (Git-Sicherung) vor dem Build aufrufen
@@ -56,6 +57,11 @@ if errorlevel 8 (
     echo [build] FEHLER: Kopieren nach D:\temp\publish fehlgeschlagen.
     exit /b 1
 )
+
+:: Alte Versionsordner loeschen; nur wenn der Ordner der aktuellen Version im jeweiligen Verzeichnis existiert
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$x=Get-Content -Raw -Encoding UTF8 '%CSPROJ%'; $m=[regex]::Match($x,'<ApplicationVersion>([\d\.]+)</ApplicationVersion>'); if(-not $m.Success){ Write-Host '[build] FEHLER: ApplicationVersion nicht gefunden'; exit 1 }; $cur='Outlook2021TodoAddIn_' + $m.Groups[1].Value.Replace('.','_'); foreach($d in @('%PROJDIR%bin\Release\app.publish\Application Files','D:\temp\publish\Application Files')){ if(-not (Test-Path -LiteralPath (Join-Path $d $cur))){ Write-Host ('[build] FEHLER: ' + $cur + ' fehlt in ' + $d + ' - nichts geloescht'); exit 1 }; Get-ChildItem -LiteralPath $d -Directory -Filter 'Outlook2021TodoAddIn_*' | Where-Object { $_.Name -ne $cur } | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force; Write-Host ('[build] Geloescht: ' + $_.FullName) } }"
+if errorlevel 1 exit /b 1
 
 echo [build] OK - Release gebaut und nach D:\temp\publish\ veroeffentlicht.
 exit /b 0
