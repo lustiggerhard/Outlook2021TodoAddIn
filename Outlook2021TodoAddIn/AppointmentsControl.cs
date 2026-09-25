@@ -2,9 +2,14 @@
  * @file    AppointmentsControl.cs
  * @brief   UserControl: Monatskalender + Terminliste.
  * @author  Gerhard Lustig <gerhard@lustig.at>
- * @version 2.7.9
- * @date    2026-06-30
+ * @version 2.8.0
+ * @date    2026-09-25
  * @history
+ *   2.8.0  2026-09-25  ClickOnce-Version (z.B. "v1.0.0.29") klein/grau rechts unten im
+ *                      Terminbereich. Gelesen aus Outlook2021TodoAddIn.dll.manifest neben
+ *                      der installierten DLL (Assembly.CodeBase, nicht Location — VSTO
+ *                      Shadow-Copy); Fallback AssemblyVersion. Terminliste reserviert die
+ *                      Label-Höhe, damit nichts überlappt.
  *   2.7.9  2026-06-30  Terminliste: Uhrzeit (_fontSmall 7.5→7.0) und Datum + Wochentag
  *                      (_fontListHdr 8.0→7.5) je 0.5pt zurückgenommen.
  *   2.7.8  2026-06-30  Terminliste: Uhrzeit (_fontSmall 6.5→7.5) sowie Datum + Wochentag
@@ -85,8 +90,11 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Drawing;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Windows.Forms;
+using System.Xml.Linq;
 using Outlook = Microsoft.Office.Interop.Outlook;
 
 namespace Outlook2021TodoAddIn
@@ -121,9 +129,15 @@ namespace Outlook2021TodoAddIn
         private int                           _cacheMonth    = -1;
         private DateTime                      _calendarBuilt = DateTime.MinValue;
 
+        // Versions-Anzeige rechts unten im Terminbereich
+        private Label _lblVersion;
+
         // Spaltenbreiten (px)
         private const int COL_TIME = 65;
         private const int COL_BAR  = 10;
+
+        // Von Outlook-Statusbalken verdeckter Bereich am unteren Rand des Terminbereichs (px)
+        private const int STATUSBAR_H = 49;
 
         // Font-Cache — einmal erstellt, wiederverwendet; Dispose via DisposeCachedFonts()
         private Font _fontBold;    // 8.5pt Bold    — Nav-Buttons, Tages-Header, fette Kalendertage
@@ -165,6 +179,21 @@ namespace Outlook2021TodoAddIn
             _flpAppointments = BuildFlowPanel();
             pnlAppointments.BackColor = _listBg;              // Container-Hintergrund (Leerraum unter Terminen)
             pnlAppointments.Controls.Add(_flpAppointments);
+
+            // Versions-Label: sitzt direkt über dem vom Statusbalken verdeckten Streifen
+            _lblVersion = new Label
+            {
+                Text      = "v" + GetPublishVersion(),
+                Font      = _fontKW,
+                ForeColor = SystemColors.GrayText,
+                BackColor = _listBg,
+                AutoSize  = true,
+                Margin    = new Padding(0)
+            };
+            pnlAppointments.Controls.Add(_lblVersion);
+            _lblVersion.BringToFront();
+            pnlAppointments.Resize += (s, e) => PositionVersionLabel();
+            PositionVersionLabel();
 
             _toolTip = new ToolTip { AutoPopDelay = 8000 };
 
@@ -242,6 +271,35 @@ namespace Outlook2021TodoAddIn
                     return cp;
                 }
             }
+        }
+
+        // ClickOnce-Version aus dem Application-Manifest neben der installierten DLL.
+        // CodeBase statt Location: VSTO lädt eine Shadow-Copy ohne Manifest daneben.
+        private static string GetPublishVersion()
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            try
+            {
+                string dll      = new Uri(asm.CodeBase).LocalPath;
+                string manifest = dll + ".manifest";
+                if (File.Exists(manifest))
+                {
+                    XNamespace asmv1 = "urn:schemas-microsoft-com:asm.v1";
+                    string v = XDocument.Load(manifest).Root?
+                                   .Element(asmv1 + "assemblyIdentity")?
+                                   .Attribute("version")?.Value;
+                    if (!string.IsNullOrEmpty(v)) return v;
+                }
+            }
+            catch { /* Fallback unten */ }
+            return asm.GetName().Version.ToString();
+        }
+
+        private void PositionVersionLabel()
+        {
+            int y = pnlAppointments.ClientSize.Height - STATUSBAR_H - _lblVersion.Height;
+            int x = pnlAppointments.ClientSize.Width  - _lblVersion.Width - 4;
+            _lblVersion.Location = new Point(Math.Max(x, 0), Math.Max(y, 0));
         }
 
         private static FlowLayoutPanel BuildFlowPanel()
@@ -548,7 +606,8 @@ namespace Outlook2021TodoAddIn
 
             if (appts.Count == 0) { _flpAppointments.ResumeLayout(); return; }
 
-            int panelH = pnlAppointments.ClientSize.Height - 49;   // -49: Outlook-Statusbalken
+            // Statusbalken-Streifen + Versions-Label freihalten
+            int panelH = pnlAppointments.ClientSize.Height - STATUSBAR_H - _lblVersion.Height;
             if (panelH <= 0) panelH = 400;
             int w = Math.Max(pnlAppointments.ClientSize.Width - 2, 100);
 
