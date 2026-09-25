@@ -2,9 +2,12 @@
  * @file    ThisAddIn.cs
  * @brief   VSTO Add-In Einstiegspunkt.
  * @author  Gerhard Lustig <gerhard@lustig.at>
- * @version 1.7.0
- * @date    2026-05-19
+ * @version 1.8.0
+ * @date    2026-09-25
  * @history
+ *   1.8.0  2026-09-25  CreateTaskPane: Retry-Logik (max. 5x, 1s/2s/3s/4s/5s) bei
+ *                      COMException E_FAIL statt fixem 1000ms-Startup-Delay.
+ *                      ActiveExplorer()-Null-Check vor Event-Hookup.
  *   1.7.0  2026-05-19  ItemAdd/Change/Remove + TryResumeRefresh rufen jetzt
  *                      InvalidateAndRefresh() statt RetrieveData() — Cache wird
  *                      bei externen Datenänderungen korrekt geleert.
@@ -21,6 +24,7 @@
 
 using Microsoft.Win32;
 using System;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Office = Microsoft.Office.Core;
 
@@ -31,9 +35,12 @@ namespace Outlook2021TodoAddIn
         public AppointmentsControl AppControl { get; set; }
         public Microsoft.Office.Tools.CustomTaskPane ToDoTaskPane { get; set; }
         private bool _taskPaneCreated = false;
-        private bool _isShuttingDown  = false;
+        private bool _isShuttingDown = false;
         private System.Windows.Forms.Timer _refreshTimer;
         private System.Windows.Forms.Timer _widthTimer;
+
+        // E_FAIL HRESULT als signed int (0x80004005)
+        private const int HRESULT_E_FAIL = unchecked((int)0x80004005);
 
         private void ThisAddIn_Startup(object sender, System.EventArgs e)
         {
@@ -47,7 +54,7 @@ namespace Outlook2021TodoAddIn
                 {
                     startupTimer.Stop();
                     startupTimer.Dispose();
-                    CreateTaskPane();
+                    CreateTaskPane(5, 1000);
                 };
                 startupTimer.Start();
             }
@@ -88,19 +95,34 @@ namespace Outlook2021TodoAddIn
             t.Start();
         }
 
-        private void CreateTaskPane()
+        // Retry-Wrapper: ActiveExplorer() ist beim Startup manchmal noch nicht bereit
+        // (Window-Handle noch nicht valide) -> CustomTaskPanes.Add wirft dann E_FAIL.
+        // Statt fixem Delay: bei E_FAIL erneut versuchen, Delay steigt pro Versuch um 1s.
+        private void CreateTaskPane(int retriesLeft, int nextDelayMs)
         {
             try
             {
+                var explorer = this.Application.ActiveExplorer();
+                if (explorer == null)
+                {
+                    if (retriesLeft > 0)
+                    {
+                        ScheduleTaskPaneRetry(retriesLeft, nextDelayMs);
+                        return;
+                    }
+                    MessageBox.Show("Error creating TaskPane: kein ActiveExplorer nach mehreren Versuchen.");
+                    return;
+                }
+
                 this.AppControl = new AppointmentsControl();
                 this.AppControl.Accounts = Properties.Settings.Default.Accounts;
 
                 ToDoTaskPane = this.CustomTaskPanes.Add(this.AppControl, " ");
-                ToDoTaskPane.Visible              = Properties.Settings.Default.Visible;
-                ToDoTaskPane.Width                = Properties.Settings.Default.Width;
-                ToDoTaskPane.DockPosition         = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
+                ToDoTaskPane.Visible = Properties.Settings.Default.Visible;
+                ToDoTaskPane.Width = Properties.Settings.Default.Width;
+                ToDoTaskPane.DockPosition = Office.MsoCTPDockPosition.msoCTPDockPositionRight;
                 ToDoTaskPane.DockPositionRestrict = Office.MsoCTPDockPositionRestrict.msoCTPDockPositionRestrictNoHorizontal;
-                ToDoTaskPane.VisibleChanged       += ToDoTaskPane_VisibleChanged;
+                ToDoTaskPane.VisibleChanged += ToDoTaskPane_VisibleChanged;
 
                 // Breite nur alle 500 ms speichern (nicht auf jeden Resize-Pixel)
                 _widthTimer = new System.Windows.Forms.Timer { Interval = 500 };
@@ -132,7 +154,6 @@ namespace Outlook2021TodoAddIn
                 ((Microsoft.Office.Interop.Outlook.ApplicationEvents_11_Event)this.Application).Quit
                     += Application_Quit;
 
-                var explorer = this.Application.ActiveExplorer();
                 explorer.Deactivate += ThisAddIn_Deactivate;
                 ((Microsoft.Office.Interop.Outlook.ExplorerEvents_10_Event)explorer).Activate
                     += Explorer_Activate;
@@ -142,10 +163,33 @@ namespace Outlook2021TodoAddIn
                 _refreshTimer.Tick += (s, e) => { if (AppControl != null) AppControl.InvalidateAndRefresh(); };
                 _refreshTimer.Start();
             }
+            catch (COMException comExc) when (comExc.HResult == HRESULT_E_FAIL)
+            {
+                if (retriesLeft > 0)
+                {
+                    ScheduleTaskPaneRetry(retriesLeft, nextDelayMs);
+                }
+                else
+                {
+                    MessageBox.Show(string.Format("Error creating TaskPane (nach allen Retries): {0}", comExc.ToString()));
+                }
+            }
             catch (Exception exc)
             {
                 MessageBox.Show(string.Format("Error creating TaskPane: {0}", exc.ToString()));
             }
+        }
+
+        private void ScheduleTaskPaneRetry(int retriesLeft, int delayMs)
+        {
+            var retryTimer = new System.Windows.Forms.Timer { Interval = delayMs };
+            retryTimer.Tick += (s, ev) =>
+            {
+                retryTimer.Stop();
+                retryTimer.Dispose();
+                CreateTaskPane(retriesLeft - 1, delayMs + 1000);
+            };
+            retryTimer.Start();
         }
 
         private void Explorer_Activate()
@@ -198,7 +242,7 @@ namespace Outlook2021TodoAddIn
         {
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             if (_refreshTimer != null) { _refreshTimer.Stop(); _refreshTimer.Dispose(); }
-            if (_widthTimer   != null) { _widthTimer.Stop();   _widthTimer.Dispose(); }
+            if (_widthTimer != null) { _widthTimer.Stop(); _widthTimer.Dispose(); }
             // Application_Quit hat bereits den korrekten Visible-Wert gespeichert —
             // kein Save() mehr wenn über Quit gefahren, sonst überschreibt VSTO-State den echten Wert.
             if (!_isShuttingDown)
@@ -217,7 +261,7 @@ namespace Outlook2021TodoAddIn
         #region VSTO generated code
         private void InternalStartup()
         {
-            this.Startup  += new System.EventHandler(ThisAddIn_Startup);
+            this.Startup += new System.EventHandler(ThisAddIn_Startup);
             this.Shutdown += new System.EventHandler(ThisAddIn_Shutdown);
         }
         #endregion
