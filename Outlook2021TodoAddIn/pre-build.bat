@@ -1,5 +1,14 @@
 @echo off
-:: pre-build.bat - Git Sicherung vor jedem Build (vollständig inkl. bin/obj)
+:: @file       pre-build.bat
+:: @brief      Git-Sicherung vor jedem Build (vollstaendig inkl. bin/obj)
+:: @author     Gerhard Lustig <gerhard@lustig.at>
+:: @version    1.1.0
+:: @date       2026-09-25
+:: @history
+::   1.1.0 (2026-09-25) - Fix: Datum/Uhrzeit vor dem if-Block ermitteln; %DATUM%/%ZEIT% wurden
+::                        im Block beim Parsen expandiert und waren in der Commit-Message leer
+::   1.0.0              - Initial release
+::
 :: Projekteigenschaften -> Buildereignisse -> Vor dem Buildvorgang:
 :: "$(ProjectDir)pre-build.bat" "$(ProjectDir)" "$(ConfigurationName)"
 
@@ -18,6 +27,12 @@ if errorlevel 1 (
     exit /b 0
 )
 
+:: Datum/Uhrzeit ausserhalb jedes Klammerblocks setzen, damit %DATUM%/%ZEIT% unten gefuellt sind
+for /f "tokens=1,2" %%a in ('powershell -NoProfile -Command "Get-Date -Format 'dd.MM.yyyy HH:mm'"') do (
+    set DATUM=%%a
+    set ZEIT=%%b
+)
+
 :: Alles stagen außer temporäre VS-Dateien
 git add -A
 git reset HEAD -- "*.suo" "*.user" ".vs/" 2>nul
@@ -25,8 +40,6 @@ git reset HEAD -- "*.suo" "*.user" ".vs/" 2>nul
 :: Prüfen ob es was zu committen gibt
 git diff --cached --quiet
 if errorlevel 1 (
-    for /f "tokens=1-3 delims=." %%a in ('powershell -NoProfile -Command "Get-Date -Format dd.MM.yyyy"') do set DATUM=%%a.%%b.%%c
-    for /f %%a in ('powershell -NoProfile -Command "Get-Date -Format HH:mm"') do set ZEIT=%%a
     git commit -m "pre-build %CONFIG% %DATUM% %ZEIT%"
     echo [pre-build] Commit: %CONFIG% %DATUM% %ZEIT%
 ) else (

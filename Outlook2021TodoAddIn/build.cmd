@@ -2,9 +2,10 @@
 :: @file       build.cmd
 :: @brief      Build + ClickOnce-Publish (Release) fuer Outlook2021TodoAddIn
 :: @author     Gerhard Lustig <gerhard@lustig.at>
-:: @version    1.1.1
+:: @version    1.2.0
 :: @date       2026-09-25
 :: @history
+::   1.2.0 (2026-09-25) - app.publish nach PublishUrl kopieren (MSBuild-CLI kopiert nicht, nur die VS-IDE)
 ::   1.1.1 (2026-09-25) - Fix: vswhere-Pfad im echo quoten, "(x86)" beendete den if-Block
 ::   1.1.0 (2026-09-25) - pre-build.bat (Git-Sicherung) vor dem Build aufrufen
 ::   1.0.0 (2026-09-25) - Initial release
@@ -41,10 +42,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$p='%CSPROJ%'; $x=Get-Content -Raw -Encoding UTF8 $p; $m=[regex]::Match($x,'<ApplicationVersion>(\d+)\.(\d+)\.(\d+)\.(\d+)</ApplicationVersion>'); if(-not $m.Success){ Write-Host '[build] FEHLER: ApplicationVersion nicht gefunden'; exit 1 }; $v='{0}.{1}.{2}.{3}' -f $m.Groups[1].Value,$m.Groups[2].Value,$m.Groups[3].Value,([int]$m.Groups[4].Value+1); $x=$x.Replace($m.Value,'<ApplicationVersion>'+$v+'</ApplicationVersion>'); [IO.File]::WriteAllText($p,$x,(New-Object Text.UTF8Encoding $true)); Write-Host ('[build] ApplicationVersion: ' + $v)"
 if errorlevel 1 exit /b 1
 
-:: Rebuild + Publish Release; PublishUrl (D:\temp\publish\) kommt aus der .csproj
+:: Rebuild + Publish Release; MSBuild-CLI erzeugt das Paket nur in bin\Release\app.publish\
 "%MSBUILD%" "%CSPROJ%" /t:Rebuild;Publish /p:Configuration=Release /p:Platform=AnyCPU /m /nologo /v:minimal
 if errorlevel 1 (
     echo [build] FEHLER: Build/Publish fehlgeschlagen.
+    exit /b 1
+)
+
+:: app.publish nach PublishUrl der .csproj kopieren; /E ohne /MIR = alte Versionsordner bleiben erhalten
+robocopy "%PROJDIR%bin\Release\app.publish" "D:\temp\publish" /E /R:2 /W:2 /NP /NFL /NDL /NJH
+:: robocopy: Exitcode 0-7 = OK, ab 8 = Fehler
+if errorlevel 8 (
+    echo [build] FEHLER: Kopieren nach D:\temp\publish fehlgeschlagen.
     exit /b 1
 )
 
